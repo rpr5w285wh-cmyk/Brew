@@ -1,5 +1,6 @@
 import { db, PROFILE_ID, type PlanDay, type Session, type Settings, type Category } from './db';
 import { weekdayOf, dayRange } from './day';
+import { activeEvents, log } from './events';
 
 /**
  * Session picker. Runs once per logical day and is memoised in plan_days.
@@ -17,7 +18,9 @@ export async function planFor(day: string, settings: Settings): Promise<PlanDay>
   const { start } = dayRange(day, settings.dayBoundary);
   const since = start - settings.noRepeatDays * 86_400_000;
 
-  const played = await db.events.where('[profileId+type]').equals([PROFILE_ID, 'session_done']).toArray();
+  // Only sessions that were actually watched count as played: undone rows and written fallbacks don't.
+  const raw = await db.events.where('profileId').equals(PROFILE_ID).and((e) => e.type === 'session_done' || e.type === 'undo').toArray();
+  const played = activeEvents(raw).filter((e) => e.type === 'session_done' && e.key && e.key !== 'fallback');
   const lastPlayed = new Map<string, number>();
   for (const e of played) if (e.key) lastPlayed.set(e.key, Math.max(lastPlayed.get(e.key) ?? 0, e.ts));
 
@@ -35,20 +38,23 @@ export async function planFor(day: string, settings: Settings): Promise<PlanDay>
     sessionId: pool[0]?.id ?? null,
     swapId: pool[1]?.id ?? null,
     tier: settings.tier,
+    swapped: false,
   };
   await db.plan_days.put(plan);
   return plan;
 }
 
+/** One swap per day, logged as an event. Returns the plan unchanged if already swapped or nothing to swap to. */
 export async function swapPlan(day: string): Promise<PlanDay | undefined> {
   const plan = await db.plan_days.get([PROFILE_ID, day]);
-  if (!plan || !plan.swapId) return plan;
-  const next: PlanDay = { ...plan, sessionId: plan.swapId, swapId: plan.sessionId };
+  if (!plan || !plan.swapId || plan.swapped) return plan;
+  const next: PlanDay = { ...plan, sessionId: plan.swapId, swapId: plan.sessionId, swapped: true };
   await db.plan_days.put(next);
+  await log('swap', { key: next.sessionId ?? undefined, meta: { from: plan.sessionId, to: next.sessionId } });
   return next;
 }
 
-export async function setPlanContext(day: string, context: 'normal' | 'off'): Promise<void> {
-  const plan = await db.plan_days.get([PROFILE_ID, day]);
-  if (plan) await db.plan_days.put({ ...plan, context });
+/** Drop today's memoised plan so the picker re-runs. Caller guards against doing this after the session is done. */
+export async function replan(day: string): Promise<void> {
+  await db.plan_days.delete([PROFILE_ID, day]);
 }

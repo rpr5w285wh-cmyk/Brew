@@ -41,7 +41,7 @@ export const DEFAULT_SETTINGS: Settings = {
   waterFloor: 3,
   tier: 0,
   noRepeatDays: 14,
-  kitchenClosedEnabled: false,
+  kitchenClosedEnabled: false, // legacy; the habit's `active` flag is the source of truth
   dayBoundary: '03:00',
   breathingUrl: 'https://rpr5w285wh-cmyk.github.io/Zazen/breathe.html',
   weighDay: 0,
@@ -75,13 +75,23 @@ export const FALLBACKS: { key: string; title: string; text: string }[] = [
   { key: 'standing', title: 'C. Standing, no mat', text: 'Shoulder rolls × 10. Side bend, 3 breaths each side. Forward fold, hang, 5 breaths. Ten slow breaths standing, eyes closed.' },
 ];
 
+let synced = false;
 export async function ensureSeeded(): Promise<void> {
   const existing = await db.profiles.get(PROFILE_ID);
   if (existing) {
-    // keep the library current: add any new sessions, never delete user state
-    await db.sessions.bulkPut(SESSIONS);
+    // Keep the library current once per app start. Merge, never replace: user-side
+    // fields such as measuredSeconds survive.
+    if (synced) return;
+    synced = true;
+    await db.transaction('rw', db.sessions, async () => {
+      for (const s of SESSIONS) {
+        const cur = await db.sessions.get(s.id);
+        await db.sessions.put(cur ? { ...s, measuredSeconds: cur.measuredSeconds } : s);
+      }
+    });
     return;
   }
+  synced = true;
   await db.transaction('rw', db.profiles, db.settings, db.habits, db.sessions, db.template, async () => {
     await db.profiles.put({ id: PROFILE_ID, name: 'MDF', createdAt: Date.now() });
     await db.settings.put(DEFAULT_SETTINGS);

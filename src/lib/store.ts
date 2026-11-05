@@ -65,10 +65,15 @@ export function useToday(): Today {
     return () => sub.unsubscribe();
   }, [ready, day]);
 
-  // roll over at the day boundary while the app is open
+  // roll over at the day boundary while the app is open, and whenever the app comes back to the foreground
   useEffect(() => {
-    const id = setInterval(() => { if (todayKey() !== day) refresh(); }, 60_000);
-    return () => clearInterval(id);
+    const check = () => { if (todayKey() !== day) refresh(); };
+    const id = setInterval(check, 60_000);
+    const onVis = () => { if (document.visibilityState === 'visible') check(); };
+    document.addEventListener('visibilitychange', onVis);
+    addEventListener('pageshow', check);
+    addEventListener('focus', check);
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', onVis); removeEventListener('pageshow', check); removeEventListener('focus', check); };
   }, [day, refresh]);
 
   return { ready, day, settings, state, plan, session, swap, habits, sessions, template, refresh };

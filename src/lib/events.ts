@@ -1,29 +1,82 @@
 import { db, PROFILE_ID, type Event, type EventType } from './db';
 import { logicalDay } from './day';
 
+// The event log is append-only. Nothing is ever deleted: an undo is itself an
+// event (`undo` with meta.undoOf = the id it cancels), and deriveDay() is the
+// single place that decides what the log means. Phase 2 reads derived views,
+// never raw rows.
+
 let boundary = '03:00';
 export function setBoundary(b: string) { boundary = b; }
 export function todayKey(now = Date.now()): string { return logicalDay(now, boundary); }
 
-export async function log(type: EventType, opts: { key?: string; value?: number | string; meta?: Record<string, unknown>; ts?: number } = {}): Promise<number> {
+/** Types that can only happen once per logical day (per key). A second tap is ignored. */
+const ONE_PER_DAY = new Set<EventType>(['up', 'lights_out', 'session_done', 'breather', 'habit_done', 'weigh']);
+/** Counters: a tap within this window of the previous one is treated as a bounce. */
+const BOUNCE_MS = 400;
+const lastCounter = new Map<string, number>();
+
+export interface LogOpts { key?: string; value?: number | string; meta?: Record<string, unknown>; ts?: number; day?: string }
+
+export async function log(type: EventType, opts: LogOpts = {}): Promise<number | null> {
   const ts = opts.ts ?? Date.now();
-  const ev: Event = { profileId: PROFILE_ID, ts, day: logicalDay(ts, boundary), type, key: opts.key, value: opts.value, meta: opts.meta };
+  const day = opts.day ?? logicalDay(ts, boundary);
+
+  if (ONE_PER_DAY.has(type)) {
+    const existing = activeEvents(await eventsForDay(day)).find((e) => e.type === type && (opts.key === undefined || e.key === opts.key));
+    if (existing) return existing.id ?? null;
+  }
+  if (type === 'water' || type === 'coffee') {
+    const prev = lastCounter.get(type) ?? 0;
+    if (ts - prev < BOUNCE_MS) return null;
+    lastCounter.set(type, ts);
+  }
+  if (type === 'context' || type === 'chip') {
+    // last-wins facts: skip if the current value is already this value
+    const cur = deriveDay(day, await eventsForDay(day));
+    if (type === 'context' && cur.context === opts.value) return null;
+    if (type === 'chip' && opts.key && cur.chips[opts.key] === opts.value) return null;
+  }
+
+  const ev: Event = { profileId: PROFILE_ID, ts, day, type, key: opts.key, value: opts.value, meta: opts.meta };
   return db.events.add(ev);
+}
+
+/** Change the value/meta of an existing event in place (used for re-rating sleep). The timestamp is never touched. */
+export async function amend(id: number, patch: { value?: number | string; meta?: Record<string, unknown> }): Promise<void> {
+  await db.events.update(id, patch);
 }
 
 export async function eventsForDay(day: string): Promise<Event[]> {
   return db.events.where('[profileId+day]').equals([PROFILE_ID, day]).sortBy('ts');
 }
 
-export async function recentEvents(type: EventType, sinceTs: number): Promise<Event[]> {
-  return db.events.where('[profileId+type]').equals([PROFILE_ID, type]).and((e) => e.ts >= sinceTs).toArray();
+/** Ids cancelled by an `undo` event in this list. Legacy `habit_undo` rows cancel the latest prior habit_done with the same key. */
+export function undoneIds(evs: Event[]): Set<number> {
+  const out = new Set<number>();
+  const sorted = [...evs].sort((a, b) => a.ts - b.ts || (a.id ?? 0) - (b.id ?? 0));
+  for (const e of sorted) {
+    if (e.type === 'undo' && typeof e.meta?.undoOf === 'number') out.add(e.meta.undoOf as number);
+    if (e.type === 'habit_undo' && e.key) {
+      const target = [...sorted].reverse().find((x) => x.type === 'habit_done' && x.key === e.key && x.ts <= e.ts && x.id !== undefined && !out.has(x.id));
+      if (target?.id !== undefined) out.add(target.id);
+    }
+  }
+  return out;
 }
 
-/** Remove the most recent event of a type/key today (one-tap undo). */
+/** Events that still count: everything except undo markers and what they cancelled. */
+export function activeEvents(evs: Event[]): Event[] {
+  const gone = undoneIds(evs);
+  return evs.filter((e) => e.type !== 'undo' && e.type !== 'habit_undo' && e.id !== undefined && !gone.has(e.id));
+}
+
+/** Undo the most recent still-active event of a type/key on a day. Appends an `undo` event; deletes nothing. */
 export async function undoLast(day: string, type: EventType, key?: string): Promise<void> {
-  const evs = await eventsForDay(day);
-  const last = [...evs].reverse().find((e) => e.type === type && (key === undefined || e.key === key));
-  if (last?.id !== undefined) await db.events.delete(last.id);
+  const act = activeEvents(await eventsForDay(day));
+  const last = [...act].reverse().find((e) => e.type === type && (key === undefined || e.key === key));
+  if (last?.id === undefined) return;
+  await db.events.add({ profileId: PROFILE_ID, ts: Date.now(), day, type: 'undo', key: type, meta: { undoOf: last.id, undoKey: last.key ?? null } });
 }
 
 export interface DayState {
@@ -33,6 +86,7 @@ export interface DayState {
   lightsOut?: Event;
   sessionDone?: Event;
   breather?: Event;
+  swaps: number;
   water: number;
   coffee: number;
   lastCoffee?: number;
@@ -42,18 +96,18 @@ export interface DayState {
 }
 
 export function deriveDay(day: string, evs: Event[]): DayState {
-  const s: DayState = { day, context: 'normal', water: 0, coffee: 0, habits: {}, chips: {} };
-  for (const e of evs) {
+  const s: DayState = { day, context: 'normal', swaps: 0, water: 0, coffee: 0, habits: {}, chips: {} };
+  for (const e of activeEvents(evs)) {
     switch (e.type) {
       case 'context': s.context = e.value === 'off' ? 'off' : 'normal'; break;
       case 'up': s.up = e; break;
       case 'lights_out': s.lightsOut = e; break;
       case 'session_done': s.sessionDone = e; break;
       case 'breather': s.breather = e; break;
+      case 'swap': s.swaps++; break;
       case 'water': s.water++; break;
       case 'coffee': s.coffee++; s.lastCoffee = e.ts; break;
       case 'habit_done': if (e.key) s.habits[e.key] = true; break;
-      case 'habit_undo': if (e.key) s.habits[e.key] = false; break;
       case 'chip': if (e.key) s.chips[e.key] = e.value ?? ''; break;
       case 'weigh': if (typeof e.value === 'number') s.weigh = e.value; break;
     }

@@ -15,14 +15,15 @@ npm run preview    # serve dist/ on the LAN
 
 `npm run dev` binds to all interfaces, so open the printed Network URL on the iPhone.
 
+## Hosted
+
+Live at **https://rpr5w285wh-cmyk.github.io/Brew/** — every push to `main` deploys via `.github/workflows/deploy.yml` (GitHub Pages, source = GitHub Actions).
+
 ## Install on the iPhone (PWA)
 
-Service workers and home-screen install need HTTPS (or `localhost`). For Phase 1 testing on the LAN, either:
+Open the link above in Safari → Share → *Add to Home Screen*. Open it from the home screen once so storage persistence is requested. New versions are applied when the app goes to the background, never while you're using it.
 
-1. **Tunnel** — `npx cloudflared tunnel --url http://localhost:4173` after `npm run preview`, open the https URL in Safari, Share → *Add to Home Screen*. Zero-setup, temporary URL.
-2. **Host** — push `dist/` to GitHub Pages or Cloudflare Pages (decision deferred to after Phase 1), open it in Safari, Share → *Add to Home Screen*.
-
-Open the installed app once so storage persistence is requested.
+For local testing on the phone, `npm run dev` binds to the LAN, but service workers and install need HTTPS — use the hosted build for that.
 
 ## Morning and evening cues (no server, no code)
 
@@ -46,7 +47,7 @@ src/screens/           Today, Session, Up, WindDown, Settings
 scripts/walkthrough.cjs  Playwright acceptance walk in iPhone emulation (needs a served build)
 ```
 
-Every tap writes one row to `events` (`up`, `lights_out`, `session_done`, `water`, `coffee`, `habit_done`, `chip`, …). Days, nights and streaks are derived — never stored.
+Every tap writes one row to `events` (`up`, `lights_out`, `session_done`, `water`, `coffee`, `habit_done`, `chip`, `swap`, …). The log is append-only: an undo is an `undo` event pointing at the row it cancels, and `deriveDay()` in `src/lib/events.ts` is the only place that interprets the log. Days, nights and streaks are derived — never stored.
 
 ## Acceptance walk
 
@@ -55,7 +56,7 @@ npm run build && npx vite preview --port 4173 &
 node scripts/walkthrough.cjs http://localhost:4173/ shots/
 ```
 
-Prints the event counts and plan for the day, and drops screenshots in `shots/`.
+Runs the daily chain plus the audit regressions (double taps, undo→redo, re-rate keeping the wake time, single swap, template edits not touching today, measured duration surviving reload). Exit code 1 on any failed check; screenshots in `shots/`.
 
 ## Notes
 

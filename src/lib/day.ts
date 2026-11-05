@@ -1,5 +1,6 @@
 // Logical days run from the day boundary (default 03:00) to the next one,
 // so "lights out" at 00:30 still belongs to the evening that preceded it.
+// All arithmetic is in local wall-clock time so DST changeover nights don't slip.
 
 export function parseHM(hm: string): { h: number; m: number } {
   const [h, m] = hm.split(':').map(Number);
@@ -15,8 +16,15 @@ export function dateKey(d: Date): string {
 /** The logical day key for a timestamp, given the boundary "HH:MM". */
 export function logicalDay(ts: number, boundary = '03:00'): string {
   const { h, m } = parseHM(boundary);
-  const d = new Date(ts - (h * 60 + m) * 60_000);
+  const d = new Date(ts);
+  if (d.getHours() * 60 + d.getMinutes() < h * 60 + m) d.setDate(d.getDate() - 1);
   return dateKey(d);
+}
+
+/** The day key after a given key. */
+export function nextDay(key: string): string {
+  const [y, mo, d] = key.split('-').map(Number);
+  return dateKey(new Date(y, mo - 1, d + 1));
 }
 
 /** [start, end) timestamps of a logical day key. */
@@ -39,10 +47,20 @@ export function fmtTime(ts: number): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/** Minutes since midnight of a timestamp, local. */
+export function minutesOfDay(ts: number): number {
+  const d = new Date(ts);
+  return d.getHours() * 60 + d.getMinutes();
+}
+
+export function hmToMinutes(hm: string): number {
+  const { h, m } = parseHM(hm);
+  return h * 60 + m;
+}
+
 /** "HH:MM" minus N minutes, wrapping at midnight. */
 export function minusMinutes(hm: string, mins: number): string {
-  const { h, m } = parseHM(hm);
-  let total = h * 60 + m - mins;
+  let total = hmToMinutes(hm) - mins;
   while (total < 0) total += 24 * 60;
   return `${pad(Math.floor(total / 60))}:${pad(total % 60)}`;
 }

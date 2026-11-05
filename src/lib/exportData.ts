@@ -14,9 +14,11 @@ export async function exportJSON(): Promise<string> {
     plan_days: await db.plan_days.toArray(),
     events: await db.events.toArray(),
   };
-  await log('export');
   return JSON.stringify(dump, null, 2);
 }
+
+/** Record that an export actually left the phone. */
+export async function markExported(kind: 'json' | 'csv'): Promise<void> { await log('export', { key: kind }); }
 
 export async function exportEventsCSV(): Promise<string> {
   const evs = await db.events.where('profileId').equals(PROFILE_ID).sortBy('ts');
@@ -31,7 +33,8 @@ export async function exportEventsCSV(): Promise<string> {
 
 export async function importJSON(text: string): Promise<{ events: number }> {
   const dump = JSON.parse(text);
-  if (dump.app !== 'brew') throw new Error('Not a Brew export');
+  if (dump?.app !== 'brew' || dump.version !== 1) throw new Error('Not a Brew export');
+  if (!Array.isArray(dump.events) || !Array.isArray(dump.settings)) throw new Error('Backup is incomplete');
   await db.transaction('rw', [db.profiles, db.settings, db.habits, db.sessions, db.template, db.plan_days, db.events], async () => {
     await db.events.clear();
     await db.plan_days.clear();
@@ -46,15 +49,18 @@ export async function importJSON(text: string): Promise<{ events: number }> {
   return { events: dump.events?.length ?? 0 };
 }
 
-export async function shareOrDownload(filename: string, text: string, mime: string): Promise<void> {
+/** Returns true if the file left the phone (shared or downloaded), false if the user cancelled. */
+export async function shareOrDownload(filename: string, text: string, mime: string): Promise<boolean> {
   const blob = new Blob([text], { type: mime });
   const file = new File([blob], filename, { type: mime });
   const nav = navigator as Navigator & { canShare?: (d: ShareData) => boolean };
   if (nav.share && nav.canShare?.({ files: [file] })) {
-    try { await nav.share({ files: [file], title: filename }); return; } catch { /* fall through to download */ }
+    try { await nav.share({ files: [file], title: filename }); return true; }
+    catch (e) { if ((e as { name?: string })?.name === 'AbortError') return false; /* otherwise fall through to download */ }
   }
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url; a.download = filename; a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return true;
 }
