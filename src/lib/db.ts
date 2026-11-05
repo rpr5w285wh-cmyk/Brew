@@ -20,6 +20,7 @@ export interface Settings {
   dayBoundary: string;       // "03:00"
   breathingUrl: string;
   weighDay: number;          // 0 = Sunday
+  theme: 'dark' | 'light' | 'system';
 }
 
 export interface Habit {

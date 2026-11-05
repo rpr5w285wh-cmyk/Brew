@@ -1,4 +1,22 @@
-:root {
+:root, html[data-theme="dark"] {
+  --bg: #17120e;
+  --card: #221a14;
+  --ink: #f1e9df;
+  --ink-2: #c7b9ab;
+  --muted: #8f8175;
+  --line: #352a22;
+  --accent: #e8c9a0;
+  --accent-ink: #1b130d;
+  --done: #7f9a6e;
+  --done-bg: #1e2619;
+  --active-bg: #2e2217;
+  --warn: #d9755a;
+  --field-bg: #2a2119;
+  --radius: 16px;
+  --tap: 56px;
+  color-scheme: dark;
+}
+html[data-theme="light"] {
   --bg: #f5efe6;
   --card: #fffaf3;
   --ink: #2b1d14;
@@ -11,8 +29,8 @@
   --done-bg: #eef2ea;
   --active-bg: #fff3df;
   --warn: #b5563a;
-  --radius: 16px;
-  --tap: 56px;
+  --field-bg: #ffffff;
+  color-scheme: light;
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif; }
@@ -68,10 +86,10 @@ h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: 
 .field { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-top: 1px solid var(--line); min-height: var(--tap); }
 .field:first-child { border-top: 0; }
 .field label { font-weight: 600; }
-.field input, .field select { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: #fff; max-width: 150px; }
+.field input, .field select { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--field-bg); color: var(--ink); max-width: 150px; }
 .field input[type="number"] { width: 84px; }
 .stepper { display: inline-flex; align-items: center; gap: 10px; }
-.stepper button { width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--line); background: #fff; font-size: 20px; }
+.stepper button { width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--line); background: var(--field-bg); font-size: 20px; }
 .fallback { padding: 12px 14px; border-top: 1px solid var(--line); }
 .fallback strong { display: block; margin-bottom: 4px; }
 .fallback p { margin: 0; color: var(--ink-2); font-size: 15px; }

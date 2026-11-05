@@ -45,6 +45,7 @@ export const DEFAULT_SETTINGS: Settings = {
   dayBoundary: '03:00',
   breathingUrl: 'https://rpr5w285wh-cmyk.github.io/Zazen/breathe.html',
   weighDay: 0,
+  theme: 'dark',
 };
 
 // weekday: 0 = Sunday … 6 = Saturday

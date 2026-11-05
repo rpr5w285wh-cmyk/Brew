@@ -1,7 +1,7 @@
 import { useState } from 'preact/hooks';
 import type { Today } from '../lib/store';
 import { saveSettings } from '../lib/store';
-import { db, PROFILE_ID, type Category, type Tier } from '../lib/db';
+import { db, PROFILE_ID, type Category, type Tier, type Settings } from '../lib/db';
 import { CATEGORY_LABEL } from '../lib/seed';
 import { log } from '../lib/events';
 import { exportJSON, exportEventsCSV, importJSON, shareOrDownload } from '../lib/exportData';
@@ -55,6 +55,11 @@ export function SettingsScreen({ t }: { t: Today }) {
       <div class="topbar">
         <div><h1>Settings</h1><p class="sub">Brew v0.1 · Phase 1</p></div>
         <button class="iconbtn" onClick={() => go('today')}>Back</button>
+      </div>
+
+      <h2>Appearance</h2>
+      <div class="card">
+        <div class="field"><label>Theme</label><select value={settings.theme} onChange={(e) => set({ theme: (e.target as HTMLSelectElement).value as Settings['theme'] })}><option value="dark">Dark</option><option value="light">Light</option><option value="system">Match phone</option></select></div>
       </div>
 
       <h2>Sleep hypothesis</h2>

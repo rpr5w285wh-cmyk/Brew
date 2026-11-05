@@ -2,6 +2,7 @@ import { useEffect } from 'preact/hooks';
 import { useRoute } from './router';
 import { useToday } from './lib/store';
 import { requestPersistence } from './lib/store';
+import { applyTheme } from './lib/theme';
 import { TodayScreen } from './screens/Today';
 import { SessionScreen } from './screens/Session';
 import { UpScreen } from './screens/Up';
@@ -13,6 +14,7 @@ export function App() {
   const today = useToday();
 
   useEffect(() => { requestPersistence(); }, []);
+  useEffect(() => { if (today.ready) applyTheme(today.settings.theme); }, [today.ready, today.settings.theme]);
 
   if (!today.ready) return <main class="screen"><p class="muted">Brewing…</p></main>;
 

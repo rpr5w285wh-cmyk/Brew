@@ -37,7 +37,7 @@ export function useToday(): Today {
     let cancelled = false;
     (async () => {
       await ensureSeeded();
-      const s = (await db.settings.get(PROFILE_ID)) ?? DEFAULT_SETTINGS;
+      const s: Settings = { ...DEFAULT_SETTINGS, ...((await db.settings.get(PROFILE_ID)) ?? {}) };
       setBoundary(s.dayBoundary);
       const d = todayKey();
       const [p, h, all, t] = await Promise.all([
