@@ -72,8 +72,12 @@ export function SessionScreen({ t }: { t: Today }) {
   const breath = breathMode ? sessions.find((s) => s.id === 'ywa-calming-breath') ?? null : null;
   const current = breath ?? (dayMode ? daySession : session);
   const off = state.context === 'off';
-  const alreadyDone = dayMode ? !!state.daySession : !!state.sessionDone;
-  const evType = dayMode ? 'day_session' : 'session_done';
+  // A yoga break taken before the morning session is done stands in for it (logged as the session, slot 'day').
+  const caughtUp = state.sessionDone?.meta?.slot === 'day';
+  const catchUp = dayMode && !state.sessionDone;
+  const alreadyDone = dayMode ? (!!state.daySession || caughtUp) : !!state.sessionDone;
+  const evType = dayMode && !catchUp ? 'day_session' : 'session_done';
+  const slotMeta = dayMode ? { slot: 'day' } : {};
   const [busy, setBusy] = useState(false);
 
   const saveDuration = async (sec: number) => {
@@ -87,8 +91,8 @@ export function SessionScreen({ t }: { t: Today }) {
   //  - did a written fallback:        key = 'fallback', meta.planned = video id (never counts as "played")
   const done = async (kind: 'video' | 'floor' | 'fallback') => {
     if (busy || alreadyDone) return; setBusy(true);
-    if (kind === 'fallback') await log(evType, { key: 'fallback', meta: { planned: current?.id ?? null, off } });
-    else await log(evType, { key: current?.id ?? 'fallback', meta: { floorOnly: kind === 'floor', measuredSeconds: current?.measuredSeconds ?? null, off } });
+    if (kind === 'fallback') await log(evType, { key: 'fallback', meta: { planned: current?.id ?? null, off, ...slotMeta } });
+    else await log(evType, { key: current?.id ?? 'fallback', meta: { floorOnly: kind === 'floor', measuredSeconds: current?.measuredSeconds ?? null, off, ...slotMeta } });
     go('today');
   };
 
@@ -140,7 +144,7 @@ export function SessionScreen({ t }: { t: Today }) {
               {swap && !plan?.swapped && <p class="note muted">Swap once: {swap.title}</p>}
             </>
           )}
-          {dayMode && <p class="note muted">Optional. A break on top of the morning session — skipping it costs nothing.</p>}
+          {dayMode && <p class="note muted">{catchUp ? "Missed the morning session? This counts as today's session." : 'Optional. A break on top of the morning session — skipping it costs nothing.'}</p>}
         </>
       )}
 

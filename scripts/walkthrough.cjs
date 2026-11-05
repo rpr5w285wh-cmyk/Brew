@@ -27,7 +27,7 @@ fs.mkdirSync(out, { recursive: true });
   const check = (name, ok, detail) => { checks.push({ name, ok: !!ok, detail }); if (!ok) console.error('FAIL', name, detail ?? ''); };
 
   await page.goto(base, { waitUntil: 'networkidle' });
-  await page.getByText('Morning').waitFor();
+  await page.getByRole('heading', { name: 'Morning' }).waitFor();
   await shot('01-today-fresh');
   check('next banner says Up', (await page.locator('.next-title').textContent()).trim() === 'Up');
 
@@ -175,6 +175,30 @@ fs.mkdirSync(out, { recursive: true });
   await page.getByText('Good night.').waitFor();
   d = await events();
   check('measuredSeconds survives reload', measuredSurvives && d.sessions.find((s) => s.id === 'ywa-take5').measuredSeconds === 333);
+
+  // Catch-up: fresh install, morning session never done, yoga break at midday counts as the session
+  {
+    const ctx2 = await browser.newContext({ ...devices['iPhone 14'], locale: 'en-CA', timezoneId: 'America/Toronto' });
+    const p2 = await ctx2.newPage();
+    await p2.goto(base, { waitUntil: 'networkidle' });
+    await p2.getByText("counts as today's session if the morning").waitFor();
+    await p2.locator('.row', { hasText: 'Yoga break' }).locator('.rowmain').click();
+    await p2.getByText("This counts as today's session").waitFor();
+    await p2.getByRole('button', { name: 'Done', exact: true }).click();
+    await p2.waitForURL((u) => !u.hash.includes('session'));
+    await p2.getByText(/as a yoga break — counts/).waitFor({ timeout: 5000 }).catch(() => {});
+    const ev2 = await p2.evaluate(async () => {
+      const req = indexedDB.open('brew'); const dbx = await new Promise((r) => { req.onsuccess = () => r(req.result); });
+      return new Promise((r) => { const q = dbx.transaction('events').objectStore('events').getAll(); q.onsuccess = () => r(q.result); });
+    });
+    const sd = ev2.filter((e) => e.type === 'session_done');
+    check('catch-up logs session_done slot=day', sd.length === 1 && sd[0].meta.slot === 'day' && ev2.filter((e) => e.type === 'day_session').length === 0, JSON.stringify(sd));
+    check('morning row shows caught up', await p2.getByText(/as a yoga break — counts/).isVisible());
+    check('break row done', await p2.getByText(/counted as today's session/).isVisible());
+    await p2.getByRole('button', { name: 'Undo yoga break' }).click();
+    await p2.getByText("counts as today's session if the morning").waitFor({ timeout: 5000 }).then(() => check('undo catch-up restores both rows', true), () => check('undo catch-up restores both rows', false));
+    await ctx2.close();
+  }
 
   console.log(JSON.stringify({ counts, plan: d.plans[0], checks, errors }, null, 2));
   const failed = checks.filter((c) => !c.ok).length;

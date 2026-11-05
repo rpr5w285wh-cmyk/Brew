@@ -68,7 +68,11 @@ export function TodayScreen({ t }: { t: Today }) {
   const sessionTitle = state.sessionDone
     ? (doneSession ? doneSession.title : 'Written fallback')
     : off ? 'Session (written fallback)' : session ? session.title : 'Session';
-  const sessionHint = state.sessionDone
+  const caughtUp = state.sessionDone?.meta?.slot === 'day';
+  const breakDone = state.daySession ?? (caughtUp ? state.sessionDone : undefined);
+  const sessionHint = caughtUp
+    ? `Done at ${fmtTime(state.sessionDone!.ts)} as a yoga break — counts`
+    : state.sessionDone
     ? (state.sessionDone.key === 'fallback' ? `Fallback at ${fmtTime(state.sessionDone.ts)} — counts` : state.sessionDone.meta?.floorOnly ? 'Floor only — counts' : `Done at ${fmtTime(state.sessionDone.ts)}`)
     : off ? '2 minutes, no video' : session ? `${session.titleMinutes} min · while the coffee brews` : 'No session planned — fallback counts';
 
@@ -182,11 +186,13 @@ export function TodayScreen({ t }: { t: Today }) {
 
       <h2>Day</h2>
       <div class="card">
-        <Step done={!!state.daySession} active={false} title="Yoga break"
-          hint={state.daySession
-            ? (state.daySession.key === 'fallback' ? `Fallback at ${fmtTime(state.daySession.ts)} — counts` : `${sessions.find((x) => x.id === state.daySession!.key)?.title ?? 'Done'} · ${fmtTime(state.daySession.ts)}`)
-            : off || !daySession ? 'Optional · a written fallback, 2 min' : `Optional · ${daySession.title} · ${daySession.titleMinutes} min, or a fallback`}
-          onTap={state.daySession ? undefined : () => go('session', { slot: 'day' })} onUndo={() => once(() => undoLast(day, 'day_session'))} undoLabel="Undo yoga break" />
+        <Step done={!!breakDone} active={false} title="Yoga break"
+          hint={breakDone
+            ? (breakDone.key === 'fallback' ? `Fallback at ${fmtTime(breakDone.ts)} — counts` : `${sessions.find((x) => x.id === breakDone.key)?.title ?? 'Done'} · ${fmtTime(breakDone.ts)}`) + (caughtUp && !state.daySession ? " · counted as today's session" : '')
+            : (state.sessionDone ? 'Optional' : "Optional · counts as today's session if the morning one didn't happen")
+              + (off || !daySession ? ' · written fallback, 2 min' : ` · ${daySession.title} · ${daySession.titleMinutes} min`)}
+          onTap={breakDone ? undefined : () => go('session', { slot: 'day' })}
+          onUndo={() => once(() => (state.daySession ? undoLast(day, 'day_session') : undoLast(day, 'session_done')))} undoLabel="Undo yoga break" />
         <Step done={h('outside')} active={activeKey === 'outside'} title="Outside"
           hint={h('outside') ? undefined : off ? 'Floor: two minutes on the step' : 'Drop-off, lunch, or pickup · 15 min; 2 min counts'}
           onTap={h('outside') ? undefined : () => doHabit('outside')} onUndo={() => undoHabit('outside')} />
