@@ -11,7 +11,7 @@ export function setBoundary(b: string) { boundary = b; }
 export function todayKey(now = Date.now()): string { return logicalDay(now, boundary); }
 
 /** Types that can only happen once per logical day (per key). A second tap is ignored. */
-const ONE_PER_DAY = new Set<EventType>(['up', 'lights_out', 'session_done', 'breather', 'habit_done', 'weigh']);
+const ONE_PER_DAY = new Set<EventType>(['up', 'lights_out', 'session_done', 'day_session', 'breather', 'habit_done', 'weigh']);
 /** Counters: a tap within this window of the previous one is treated as a bounce. */
 const BOUNCE_MS = 400;
 const lastCounter = new Map<string, number>();
@@ -86,6 +86,7 @@ export interface DayState {
   up?: Event;
   lightsOut?: Event;
   sessionDone?: Event;
+  daySession?: Event;
   breather?: Event;
   swaps: number;
   water: number;
@@ -109,6 +110,7 @@ export function deriveDay(day: string, evs: Event[]): DayState {
       case 'up': s.up = e; break;
       case 'lights_out': s.lightsOut = e; break;
       case 'session_done': s.sessionDone = e; break;
+      case 'day_session': s.daySession = e; break;
       case 'breather': s.breather = e; break;
       case 'swap': s.swaps++; break;
       case 'water': s.water++; break;

@@ -13,6 +13,7 @@ export interface Today {
   plan: PlanDay | null;
   session: Session | null;
   swap: Session | null;
+  daySession: Session | null;
   habits: Habit[];
   sessions: Session[];
   template: TemplateRow[];
@@ -27,6 +28,7 @@ export function useToday(): Today {
   const [plan, setPlan] = useState<PlanDay | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [swap, setSwap] = useState<Session | null>(null);
+  const [daySession, setDaySession] = useState<Session | null>(null);
   const [habits, setHabits] = useState<Habit[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [template, setTemplate] = useState<TemplateRow[]>([]);
@@ -50,6 +52,7 @@ export function useToday(): Today {
       setSettings(s); setDay(d); setPlan(p); setHabits(h); setSessions(all); setTemplate(t);
       setSession(p.sessionId ? all.find((x) => x.id === p.sessionId) ?? null : null);
       setSwap(p.swapId ? all.find((x) => x.id === p.swapId) ?? null : null);
+      setDaySession(p.daySessionId ? all.find((x) => x.id === p.daySessionId) ?? null : null);
       setReady(true);
     })();
     return () => { cancelled = true; };
@@ -76,7 +79,7 @@ export function useToday(): Today {
     return () => { clearInterval(id); document.removeEventListener('visibilitychange', onVis); removeEventListener('pageshow', check); removeEventListener('focus', check); };
   }, [day, refresh]);
 
-  return { ready, day, settings, state, plan, session, swap, habits, sessions, template, refresh };
+  return { ready, day, settings, state, plan, session, swap, daySession, habits, sessions, template, refresh };
 }
 
 export async function saveSettings(patch: Partial<Settings>): Promise<void> {

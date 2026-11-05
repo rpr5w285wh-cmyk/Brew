@@ -66,12 +66,14 @@ export function Player({ session, onDuration }: { session: Session; onDuration: 
 const BREATH_FALLBACK = 'Lying or sitting. In through the nose for 4, hold for 4, out through the mouth for 6. Ten rounds, about two minutes. Then feet on the floor.';
 
 export function SessionScreen({ t }: { t: Today }) {
-  const { day, state, session, swap, sessions, settings, plan } = t;
+  const { day, state, session, swap, sessions, settings, plan, daySession } = t;
   const breathMode = query().get('breath') === '1';
+  const dayMode = !breathMode && query().get('slot') === 'day';
   const breath = breathMode ? sessions.find((s) => s.id === 'ywa-calming-breath') ?? null : null;
-  const current = breath ?? session;
+  const current = breath ?? (dayMode ? daySession : session);
   const off = state.context === 'off';
-  const alreadyDone = !!state.sessionDone;
+  const alreadyDone = dayMode ? !!state.daySession : !!state.sessionDone;
+  const evType = dayMode ? 'day_session' : 'session_done';
   const [busy, setBusy] = useState(false);
 
   const saveDuration = async (sec: number) => {
@@ -85,19 +87,19 @@ export function SessionScreen({ t }: { t: Today }) {
   //  - did a written fallback:        key = 'fallback', meta.planned = video id (never counts as "played")
   const done = async (kind: 'video' | 'floor' | 'fallback') => {
     if (busy || alreadyDone) return; setBusy(true);
-    if (kind === 'fallback') await log('session_done', { key: 'fallback', meta: { planned: current?.id ?? null, off } });
-    else await log('session_done', { key: current?.id ?? 'fallback', meta: { floorOnly: kind === 'floor', measuredSeconds: current?.measuredSeconds ?? null, off } });
+    if (kind === 'fallback') await log(evType, { key: 'fallback', meta: { planned: current?.id ?? null, off } });
+    else await log(evType, { key: current?.id ?? 'fallback', meta: { floorOnly: kind === 'floor', measuredSeconds: current?.measuredSeconds ?? null, off } });
     go('today');
   };
 
-  const canSwap = !!swap && !plan?.swapped && !alreadyDone && !off;
+  const canSwap = !dayMode && !!swap && !plan?.swapped && !alreadyDone && !off;
   const doSwap = async () => { if (!canSwap) return; await swapPlan(day); t.refresh(); };
 
   return (
     <main class="screen">
       <div class="topbar">
         <div>
-          <h1>{breathMode ? 'Breather' : 'Session'}</h1>
+          <h1>{breathMode ? 'Breather' : dayMode ? 'Yoga break' : 'Session'}</h1>
           <p class="sub">{current ? `${CATEGORY_LABEL[current.category]} · ${current.titleMinutes} min${current.measuredSeconds ? ` (${Math.floor(current.measuredSeconds / 60)}:${String(current.measuredSeconds % 60).padStart(2, '0')})` : ''}` : 'No session planned'}</p>
         </div>
         <button class="iconbtn" onClick={() => go('today')}>Back</button>
@@ -114,7 +116,7 @@ export function SessionScreen({ t }: { t: Today }) {
       )}
 
       {!breathMode && alreadyDone && (
-        <p class="note">Today's session is logged. Undo it from Today if that was a mistake.</p>
+        <p class="note">{dayMode ? "Today's yoga break is logged." : "Today's session is logged."} Undo it from Today if that was a mistake.</p>
       )}
 
       {!breathMode && !alreadyDone && current && !off && (
@@ -127,16 +129,23 @@ export function SessionScreen({ t }: { t: Today }) {
             </div>
           </div>
           <button class="btn" onClick={() => done('video')} disabled={busy}>Done</button>
-          <div class="split">
+          {dayMode ? (
             <button class="btn quiet" onClick={() => done('floor')} disabled={busy}>Floor only</button>
-            <button class="btn quiet" onClick={doSwap} disabled={!canSwap}>{plan?.swapped ? 'Swapped' : swap ? `Swap → ${swap.titleMinutes} min` : 'No swap'}</button>
-          </div>
-          {swap && !plan?.swapped && <p class="note muted">Swap once: {swap.title}</p>}
+          ) : (
+            <>
+              <div class="split">
+                <button class="btn quiet" onClick={() => done('floor')} disabled={busy}>Floor only</button>
+                <button class="btn quiet" onClick={doSwap} disabled={!canSwap}>{plan?.swapped ? 'Swapped' : swap ? `Swap → ${swap.titleMinutes} min` : 'No swap'}</button>
+              </div>
+              {swap && !plan?.swapped && <p class="note muted">Swap once: {swap.title}</p>}
+            </>
+          )}
+          {dayMode && <p class="note muted">Optional. A break on top of the morning session — skipping it costs nothing.</p>}
         </>
       )}
 
       {!breathMode && !alreadyDone && off && (
-        <p class="note">Off-routine day: a written fallback is the session. Two minutes counts.</p>
+        <p class="note">Off-routine day: a written fallback is the {dayMode ? 'break' : 'session'}. Two minutes counts.</p>
       )}
 
       {!breathMode && (

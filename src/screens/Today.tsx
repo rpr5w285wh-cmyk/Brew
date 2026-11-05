@@ -34,7 +34,7 @@ function Step({ done, active, title, hint, onTap, onUndo, undoLabel, children }:
 }
 
 export function TodayScreen({ t }: { t: Today }) {
-  const { day, state, settings, session, habits, sessions } = t;
+  const { day, state, settings, session, habits, sessions, daySession } = t;
   const off = state.context === 'off';
   const [toast, setToast] = useState<string | null>(null);
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 1400); };
@@ -182,6 +182,11 @@ export function TodayScreen({ t }: { t: Today }) {
 
       <h2>Day</h2>
       <div class="card">
+        <Step done={!!state.daySession} active={false} title="Yoga break"
+          hint={state.daySession
+            ? (state.daySession.key === 'fallback' ? `Fallback at ${fmtTime(state.daySession.ts)} — counts` : `${sessions.find((x) => x.id === state.daySession!.key)?.title ?? 'Done'} · ${fmtTime(state.daySession.ts)}`)
+            : off || !daySession ? 'Optional · a written fallback, 2 min' : `Optional · ${daySession.title} · ${daySession.titleMinutes} min, or a fallback`}
+          onTap={state.daySession ? undefined : () => go('session', { slot: 'day' })} onUndo={() => once(() => undoLast(day, 'day_session'))} undoLabel="Undo yoga break" />
         <Step done={h('outside')} active={activeKey === 'outside'} title="Outside"
           hint={h('outside') ? undefined : off ? 'Floor: two minutes on the step' : 'Drop-off, lunch, or pickup · 15 min; 2 min counts'}
           onTap={h('outside') ? undefined : () => doHabit('outside')} onUndo={() => undoHabit('outside')} />

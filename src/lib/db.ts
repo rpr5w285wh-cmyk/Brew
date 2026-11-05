@@ -60,12 +60,14 @@ export interface PlanDay {
   swapId: string | null;
   tier: Tier;
   swapped?: boolean;
+  /** Optional daytime yoga break; never the morning pick or its swap. */
+  daySessionId?: string | null;
 }
 
 export type EventType =
   | 'up' | 'lights_out' | 'habit_done' | 'habit_undo' | 'session_done'
   | 'water' | 'coffee' | 'tea' | 'tisane' | 'weigh' | 'chip' | 'context' | 'tier_change' | 'export' | 'breather'
-  | 'undo' | 'swap';
+  | 'undo' | 'swap' | 'day_session';
 
 export interface Event {
   id?: number;

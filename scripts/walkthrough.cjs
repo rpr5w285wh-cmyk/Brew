@@ -118,6 +118,19 @@ fs.mkdirSync(out, { recursive: true });
   check('tea and tisane logged', d.events.filter((e) => e.type === 'tea').length === 1 && d.events.filter((e) => e.type === 'tisane').length === 2);
 
   await row('Outside').click();
+
+  // Yoga break: optional daytime slot, its own pick, never the morning video
+  check('yoga break not the Next item', (await page.locator('.next-title').textContent()).trim() !== 'Yoga break');
+  await row('Yoga break').click();
+  await page.waitForURL(/slot=day/);
+  await page.locator('h1', { hasText: 'Yoga break' }).waitFor();
+  const breakTitle = (await page.locator('.stitle').first().textContent()).trim();
+  check('yoga break is a different video', breakTitle !== swappedTitle && breakTitle !== sessionTitle, breakTitle);
+  check('no swap on the break', (await page.getByRole('button', { name: /^Swap/ }).count()) === 0);
+  await page.getByRole('button', { name: 'Done', exact: true }).dblclick();
+  await page.waitForURL((u) => !u.hash.includes('session'));
+  d = await events();
+  check('day_session logged once, morning untouched', d.events.filter((e) => e.type === 'day_session').length === 1 && d.events.filter((e) => e.type === 'session_done').length === 1);
   await page.getByText('Wind-down').first().waitFor();
   await shot('04-today-midday');
   check('next banner after morning', (await page.locator('.next-title').textContent()).trim() === 'Wind-down');
