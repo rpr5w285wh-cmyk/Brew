@@ -21,6 +21,7 @@ export interface Settings {
   breathingUrl: string;
   weighDay: number;          // 0 = Sunday
   theme: 'dark' | 'light' | 'system';
+  tisaneCountsAsWater: boolean;
 }
 
 export interface Habit {
@@ -63,7 +64,7 @@ export interface PlanDay {
 
 export type EventType =
   | 'up' | 'lights_out' | 'habit_done' | 'habit_undo' | 'session_done'
-  | 'water' | 'coffee' | 'weigh' | 'chip' | 'context' | 'tier_change' | 'export' | 'breather'
+  | 'water' | 'coffee' | 'tea' | 'tisane' | 'weigh' | 'chip' | 'context' | 'tier_change' | 'export' | 'breather'
   | 'undo' | 'swap';
 
 export interface Event {

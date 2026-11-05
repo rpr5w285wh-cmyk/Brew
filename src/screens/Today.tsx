@@ -51,6 +51,10 @@ export function TodayScreen({ t }: { t: Today }) {
     flash(next === 'off' ? 'Off-routine day' : 'Back to routine');
   });
 
+  const fluids = state.water + (settings.tisaneCountsAsWater ? state.tisane : 0);
+  const fluidsSub = `${fluids}/${settings.waterTarget}`
+    + (settings.tisaneCountsAsWater && state.tisane > 0 ? ` · ${state.tisane} tisane` : '');
+
   const isWeighDay = weekdayOf(day) === settings.weighDay && !off;
   const [weight, setWeight] = useState('');
   const kitchen = habits.find((x) => x.key === 'kitchen_closed');
@@ -143,7 +147,8 @@ export function TodayScreen({ t }: { t: Today }) {
           <button class="btn quiet" onClick={() => once(() => undoLast(day, 'lights_out'))}>Not yet — undo lights out</button>
         </div>
         <div class="card" style="margin-top:12px">
-          <Counter label="Water" sub={`${state.water}/${settings.waterTarget}`} count={state.water} onMinus={() => once(() => undoLast(day, 'water'))} onPlus={() => log('water')} />
+          <Counter label="Water" sub={fluidsSub} count={state.water} onMinus={() => once(() => undoLast(day, 'water'))} onPlus={() => log('water')} />
+          <Counter label="Tisane" sub="no caffeine" count={state.tisane} onMinus={() => once(() => undoLast(day, 'tisane'))} onPlus={() => log('tisane')} />
         </div>
         {toast && <div class="toast">{toast}</div>}
       </main>
@@ -166,10 +171,17 @@ export function TodayScreen({ t }: { t: Today }) {
         {morning.map((m) => m.el(m.key === activeKey))}
       </div>
 
+      <h2>Drinks</h2>
+      <div class="card">
+        <Counter label="Water" sub={fluids < settings.waterFloor ? `${fluidsSub} · floor ${settings.waterFloor}` : fluidsSub} count={state.water} onMinus={() => once(() => undoLast(day, 'water'))} onPlus={() => log('water')} />
+        <Counter label="Coffee" sub={state.lastCoffee ? `last ${fmtTime(state.lastCoffee)}` : 'none yet'} count={state.coffee} onMinus={() => once(() => undoLast(day, 'coffee'))} onPlus={() => log('coffee')} />
+        <Counter label="Tea" sub={state.lastTea ? `last ${fmtTime(state.lastTea)}` : 'caffeinated'} count={state.tea} onMinus={() => once(() => undoLast(day, 'tea'))} onPlus={() => log('tea')} />
+        <Counter label="Tisane" sub={settings.tisaneCountsAsWater ? 'counts as water' : 'no caffeine'} count={state.tisane} onMinus={() => once(() => undoLast(day, 'tisane'))} onPlus={() => log('tisane')} />
+        {state.lastCaffeine && <div class="counter-note">Last caffeine {fmtTime(state.lastCaffeine)}</div>}
+      </div>
+
       <h2>Day</h2>
       <div class="card">
-        <Counter label="Water" sub={`${state.water}/${settings.waterTarget} · floor ${settings.waterFloor}`} count={state.water} onMinus={() => once(() => undoLast(day, 'water'))} onPlus={() => log('water')} />
-        <Counter label="Coffee" sub={state.lastCoffee ? `last at ${fmtTime(state.lastCoffee)}` : 'none yet'} count={state.coffee} onMinus={() => once(() => undoLast(day, 'coffee'))} onPlus={() => log('coffee')} />
         <Step done={h('outside')} active={activeKey === 'outside'} title="Outside"
           hint={h('outside') ? undefined : off ? 'Floor: two minutes on the step' : 'Drop-off, lunch, or pickup · 15 min; 2 min counts'}
           onTap={h('outside') ? undefined : () => doHabit('outside')} onUndo={() => undoHabit('outside')} />

@@ -15,6 +15,7 @@ const ONE_PER_DAY = new Set<EventType>(['up', 'lights_out', 'session_done', 'bre
 /** Counters: a tap within this window of the previous one is treated as a bounce. */
 const BOUNCE_MS = 400;
 const lastCounter = new Map<string, number>();
+const DRINKS = new Set<EventType>(['water', 'coffee', 'tea', 'tisane']);
 
 export interface LogOpts { key?: string; value?: number | string; meta?: Record<string, unknown>; ts?: number; day?: string }
 
@@ -26,7 +27,7 @@ export async function log(type: EventType, opts: LogOpts = {}): Promise<number |
     const existing = activeEvents(await eventsForDay(day)).find((e) => e.type === type && (opts.key === undefined || e.key === opts.key));
     if (existing) return existing.id ?? null;
   }
-  if (type === 'water' || type === 'coffee') {
+  if (DRINKS.has(type)) {
     const prev = lastCounter.get(type) ?? 0;
     if (ts - prev < BOUNCE_MS) return null;
     lastCounter.set(type, ts);
@@ -89,14 +90,19 @@ export interface DayState {
   swaps: number;
   water: number;
   coffee: number;
+  tea: number;
+  tisane: number;
   lastCoffee?: number;
+  lastTea?: number;
+  /** Last coffee or caffeinated tea — the caffeine factor for the sleep experiment. */
+  lastCaffeine?: number;
   habits: Record<string, boolean>;
   chips: Record<string, string | number>;
   weigh?: number;
 }
 
 export function deriveDay(day: string, evs: Event[]): DayState {
-  const s: DayState = { day, context: 'normal', swaps: 0, water: 0, coffee: 0, habits: {}, chips: {} };
+  const s: DayState = { day, context: 'normal', swaps: 0, water: 0, coffee: 0, tea: 0, tisane: 0, habits: {}, chips: {} };
   for (const e of activeEvents(evs)) {
     switch (e.type) {
       case 'context': s.context = e.value === 'off' ? 'off' : 'normal'; break;
@@ -106,7 +112,9 @@ export function deriveDay(day: string, evs: Event[]): DayState {
       case 'breather': s.breather = e; break;
       case 'swap': s.swaps++; break;
       case 'water': s.water++; break;
-      case 'coffee': s.coffee++; s.lastCoffee = e.ts; break;
+      case 'coffee': s.coffee++; s.lastCoffee = e.ts; s.lastCaffeine = e.ts; break;
+      case 'tea': s.tea++; s.lastTea = e.ts; s.lastCaffeine = e.ts; break;
+      case 'tisane': s.tisane++; break;
       case 'habit_done': if (e.key) s.habits[e.key] = true; break;
       case 'chip': if (e.key) s.chips[e.key] = e.value ?? ''; break;
       case 'weigh': if (typeof e.value === 'number') s.weigh = e.value; break;

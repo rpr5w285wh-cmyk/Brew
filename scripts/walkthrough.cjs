@@ -103,10 +103,19 @@ fs.mkdirSync(out, { recursive: true });
   const plus = page.locator('.counter .pill');
   await plus.nth(0).click(); await page.waitForTimeout(450); await plus.nth(0).click(); await page.waitForTimeout(450); await plus.nth(0).click();
   await page.waitForTimeout(450); await plus.nth(1).click(); await page.waitForTimeout(450); await plus.nth(1).click();
-  await page.getByText(/last at/).waitFor();
+  await page.getByText(/^last \d/).waitFor();
   await plus.nth(0).dblclick(); // bounce → counts once
   await page.waitForTimeout(500);
   check('water bounce', (await page.locator('.counter .count').first().textContent()).trim() === '4');
+  // Tea (caffeinated) and tisane (counts toward water by default)
+  await page.waitForTimeout(450); await plus.nth(2).click();
+  await page.waitForTimeout(450); await plus.nth(3).click(); await page.waitForTimeout(450); await plus.nth(3).click();
+  await page.waitForTimeout(400);
+  const waterSub = (await page.locator('.counter').first().locator('.sub').textContent()).trim();
+  check('tisane counts toward water', waterSub === '6/6 · 2 tisane', waterSub);
+  check('last caffeine shown (tea after coffee)', await page.getByText(/Last caffeine/).isVisible());
+  d = await events();
+  check('tea and tisane logged', d.events.filter((e) => e.type === 'tea').length === 1 && d.events.filter((e) => e.type === 'tisane').length === 2);
 
   await row('Outside').click();
   await page.getByText('Wind-down').first().waitFor();
