@@ -67,7 +67,7 @@ export interface PlanDay {
 export type EventType =
   | 'up' | 'lights_out' | 'habit_done' | 'habit_undo' | 'session_done'
   | 'water' | 'coffee' | 'tea' | 'tisane' | 'weigh' | 'chip' | 'context' | 'tier_change' | 'export' | 'breather'
-  | 'undo' | 'swap' | 'day_session' | 'night_up' | 'back_to_bed' | 'session_later';
+  | 'undo' | 'swap' | 'day_session' | 'night_up' | 'back_to_bed' | 'session_later' | 'habit_skip';
 
 export interface Event {
   id?: number;

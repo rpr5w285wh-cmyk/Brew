@@ -11,7 +11,7 @@ export function setBoundary(b: string) { boundary = b; }
 export function todayKey(now = Date.now()): string { return logicalDay(now, boundary); }
 
 /** Types that can only happen once per logical day (per key). A second tap is ignored. */
-const ONE_PER_DAY = new Set<EventType>(['up', 'lights_out', 'session_done', 'session_later', 'day_session', 'breather', 'habit_done', 'weigh']);
+const ONE_PER_DAY = new Set<EventType>(['up', 'lights_out', 'session_done', 'session_later', 'day_session', 'breather', 'habit_done', 'habit_skip', 'weigh']);
 /** Counters: a tap within this window of the previous one is treated as a bounce. */
 const BOUNCE_MS = 400;
 const lastCounter = new Map<string, number>();
@@ -104,12 +104,14 @@ export interface DayState {
   /** Last coffee or caffeinated tea — the caffeine factor for the sleep experiment. */
   lastCaffeine?: number;
   habits: Record<string, boolean>;
+  /** Habits deliberately skipped today (kept apart from done for the weekly review). */
+  skipped: Record<string, boolean>;
   chips: Record<string, string | number>;
   weigh?: number;
 }
 
 export function deriveDay(day: string, evs: Event[]): DayState {
-  const s: DayState = { day, context: 'normal', awake: [], swaps: 0, water: 0, coffee: 0, tea: 0, tisane: 0, habits: {}, chips: {} };
+  const s: DayState = { day, context: 'normal', awake: [], swaps: 0, skipped: {}, water: 0, coffee: 0, tea: 0, tisane: 0, habits: {}, chips: {} };
   for (const e of [...activeEvents(evs)].sort((a, b) => a.ts - b.ts)) {
     switch (e.type) {
       case 'context': s.context = e.value === 'off' ? 'off' : 'normal'; break;
@@ -127,6 +129,7 @@ export function deriveDay(day: string, evs: Event[]): DayState {
       case 'tea': s.tea++; s.lastTea = e.ts; s.lastCaffeine = e.ts; break;
       case 'tisane': s.tisane++; break;
       case 'habit_done': if (e.key) s.habits[e.key] = true; break;
+      case 'habit_skip': if (e.key) s.skipped[e.key] = true; break;
       case 'chip': if (e.key) s.chips[e.key] = e.value ?? ''; break;
       case 'weigh': if (typeof e.value === 'number') s.weigh = e.value; break;
     }

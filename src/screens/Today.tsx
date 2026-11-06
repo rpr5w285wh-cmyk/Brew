@@ -134,8 +134,14 @@ export function TodayScreen({ t }: { t: Today }) {
       ),
     },
     {
-      key: 'shower', label: 'Shower', done: h('shower'), go: () => doHabit('shower'),
-      el: (active) => <Step done={h('shower')} active={active} title="Shower" hint={off ? 'Any time today counts' : undefined} onTap={h('shower') ? undefined : () => doHabit('shower')} onUndo={() => undoHabit('shower')} />,
+      key: 'shower', label: 'Shower', done: h('shower') || !!state.skipped['shower'], go: () => doHabit('shower'),
+      el: (active) => state.skipped['shower'] && !h('shower') ? (
+        <Step done active={false} title="Shower" hint="Skipped today" onUndo={() => once(() => undoLast(day, 'habit_skip', 'shower'))} undoLabel="Undo skipping the shower" />
+      ) : (
+        <Step done={h('shower')} active={active} title="Shower" hint={off ? 'Any time today counts' : undefined} onTap={h('shower') ? undefined : () => doHabit('shower')} onUndo={() => undoHabit('shower')}>
+          {!h('shower') && <button class="undo later" onClick={() => once(() => log('habit_skip', { key: 'shower' }))} aria-label="Skip the shower today">skip</button>}
+        </Step>
+      ),
     },
   ];
   const breakItem: Item = { key: 'daybreak', label: 'Yoga break', done: false, go: () => go('session', { slot: 'day' }), el: () => <></> };
@@ -146,7 +152,7 @@ export function TodayScreen({ t }: { t: Today }) {
   let next: Item | null = null;
   if (!state.lightsOut) {
     if (isEvening) next = windItem;
-    else next = morning.find((m) => !m.done) ?? (movedLater ? breakItem : null) ?? (!outsideItem.done ? outsideItem : null) ?? windItem;
+    else next = morning.find((m) => !m.done) ?? (!outsideItem.done ? outsideItem : null) ?? (movedLater ? breakItem : null) ?? windItem;
   }
   const activeKey = next?.key ?? null;
 
@@ -216,6 +222,9 @@ export function TodayScreen({ t }: { t: Today }) {
 
       <h2>Day</h2>
       <div class="card">
+        <Step done={h('outside')} active={activeKey === 'outside'} title="Outside"
+          hint={h('outside') ? undefined : off ? 'Floor: two minutes on the step' : 'Drop-off, lunch, or pickup · 15 min; 2 min counts'}
+          onTap={h('outside') ? undefined : () => doHabit('outside')} onUndo={() => undoHabit('outside')} />
         <Step done={!!breakDone} active={activeKey === 'daybreak'} title="Yoga break"
           hint={breakDone
             ? (breakDone.key === 'fallback' ? `Fallback at ${fmtTime(breakDone.ts)} — counts` : `${sessions.find((x) => x.id === breakDone.key)?.title ?? 'Done'} · ${fmtTime(breakDone.ts)}`) + (caughtUp && !state.daySession ? " · counted as today's session" : '')
@@ -225,9 +234,6 @@ export function TodayScreen({ t }: { t: Today }) {
                 + (off || !daySession ? ' · written fallback, 2 min' : ` · ${daySession.title} · ${daySession.titleMinutes} min`)}
           onTap={breakDone ? undefined : () => go('session', { slot: 'day' })}
           onUndo={() => once(() => (state.daySession ? undoLast(day, 'day_session') : undoLast(day, 'session_done')))} undoLabel="Undo yoga break" />
-        <Step done={h('outside')} active={activeKey === 'outside'} title="Outside"
-          hint={h('outside') ? undefined : off ? 'Floor: two minutes on the step' : 'Drop-off, lunch, or pickup · 15 min; 2 min counts'}
-          onTap={h('outside') ? undefined : () => doHabit('outside')} onUndo={() => undoHabit('outside')} />
       </div>
 
       <h2>Evening</h2>
