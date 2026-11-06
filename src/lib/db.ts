@@ -67,10 +67,15 @@ export interface PlanDay {
 export type EventType =
   | 'up' | 'lights_out' | 'habit_done' | 'habit_undo' | 'session_done'
   | 'water' | 'coffee' | 'tea' | 'tisane' | 'weigh' | 'chip' | 'context' | 'tier_change' | 'export' | 'breather'
-  | 'undo' | 'swap' | 'day_session' | 'night_up' | 'back_to_bed' | 'session_later' | 'habit_skip';
+  | 'undo' | 'swap' | 'day_session' | 'night_up' | 'back_to_bed' | 'session_later' | 'habit_skip' | 'amend';
 
 export interface Event {
+  /** Local auto-increment key (this device only). */
   id?: number;
+  /** Permanent id, minted on the device; the same on every device and in the cloud. */
+  uid?: string;
+  /** 0 = not yet uploaded. */
+  synced?: 0 | 1;
   profileId: string;
   ts: number;
   day: string; // logical day key at time of logging
@@ -100,7 +105,33 @@ export class BrewDB extends Dexie {
       plan_days: '[profileId+date], date',
       events: '++id, profileId, ts, day, type, [profileId+day], [profileId+type]',
     });
+    // v2: permanent ids. Every event gets a UUID; undo markers point at UUIDs instead of local ids.
+    this.version(2).stores({
+      events: '++id, &uid, profileId, ts, day, type, synced, [profileId+day], [profileId+type]',
+    }).upgrade(async (tx) => {
+      const table = tx.table('events');
+      const all: Event[] = await table.toArray();
+      const uidOf = new Map<number, string>();
+      for (const e of all) { if (!e.uid) e.uid = newUid(); if (e.id !== undefined) uidOf.set(e.id, e.uid); }
+      for (const e of all) {
+        if (e.type === 'undo' && typeof e.meta?.undoOf === 'number') {
+          const u = uidOf.get(e.meta.undoOf as number);
+          e.meta = { ...e.meta, undoOf: u ?? null, legacyUndoOf: e.meta.undoOf };
+        }
+        e.synced = 0;
+        await table.put(e);
+      }
+    });
   }
+}
+
+export function newUid(): string {
+  const c = globalThis.crypto as Crypto;
+  if (typeof c.randomUUID === 'function') return c.randomUUID();
+  const b = c.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
+  const h = [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
 export const db = new BrewDB();

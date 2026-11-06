@@ -1,4 +1,4 @@
-import { db, PROFILE_ID } from './db';
+import { db, PROFILE_ID, newUid, type Event } from './db';
 import { log } from './events';
 
 export async function exportJSON(): Promise<string> {
@@ -23,9 +23,9 @@ export async function markExported(kind: 'json' | 'csv'): Promise<void> { await 
 export async function exportEventsCSV(): Promise<string> {
   const evs = await db.events.where('profileId').equals(PROFILE_ID).sortBy('ts');
   const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const rows = [['id', 'ts', 'iso', 'day', 'type', 'key', 'value', 'meta'].join(',')];
+  const rows = [['uid', 'ts', 'iso', 'day', 'type', 'key', 'value', 'meta'].join(',')];
   for (const e of evs) {
-    const cells: unknown[] = [e.id, e.ts, new Date(e.ts).toISOString(), e.day, e.type, e.key, e.value, JSON.stringify(e.meta ?? {})];
+    const cells: unknown[] = [e.uid, e.ts, new Date(e.ts).toISOString(), e.day, e.type, e.key, e.value, JSON.stringify(e.meta ?? {})];
     rows.push(cells.map(esc).join(','));
   }
   return rows.join('\n');
@@ -44,7 +44,14 @@ export async function importJSON(text: string): Promise<{ events: number }> {
     if (dump.sessions) await db.sessions.bulkPut(dump.sessions);
     if (dump.template) await db.template.bulkPut(dump.template);
     if (dump.plan_days) await db.plan_days.bulkPut(dump.plan_days);
-    if (dump.events) await db.events.bulkAdd(dump.events.map((e: Record<string, unknown>) => { const { id: _id, ...rest } = e; return rest; }));
+    if (dump.events) {
+      // Older backups have no uids: mint them and point undo markers at them.
+      const evs = dump.events as Event[];
+      const uidOf = new Map<number, string>();
+      for (const e of evs) { if (!e.uid) e.uid = newUid(); if (e.id !== undefined) uidOf.set(e.id, e.uid); }
+      for (const e of evs) if (e.type === 'undo' && typeof e.meta?.undoOf === 'number') e.meta = { ...e.meta, undoOf: uidOf.get(e.meta.undoOf as number) ?? null };
+      await db.events.bulkAdd(evs.map(({ id: _id, ...rest }) => ({ ...rest, synced: 0 as const })));
+    }
   });
   return { events: dump.events?.length ?? 0 };
 }

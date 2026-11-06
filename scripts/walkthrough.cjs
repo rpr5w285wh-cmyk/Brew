@@ -54,7 +54,10 @@ fs.mkdirSync(out, { recursive: true });
   await page.waitForURL((u) => !u.hash.includes('up'));
   d = await events();
   const ups = d.events.filter((e) => e.type === 'up');
-  check('re-rate keeps wake ts and id', ups.length === 1 && ups[0].id === up1.id && ups[0].ts === up1.ts && ups[0].value === 3, JSON.stringify(ups));
+  const am = d.events.filter((e) => e.type === 'amend');
+  check('re-rate appends an amend, original untouched', ups.length === 1 && ups[0].uid === up1.uid && ups[0].ts === up1.ts && ups[0].value === 4 && am.length === 1 && am[0].meta.target === up1.uid && am[0].value === 3, JSON.stringify({ ups, am }));
+  check('re-rate shows the new rating', await page.getByText(/slept 3\/5/).isVisible());
+  check('every event has a uid', d.events.every((e) => typeof e.uid === 'string' && e.uid.length === 36));
 
   // Breather: double-tap skip → one event; undo → buttons back
   await page.getByRole('button', { name: 'Skip the breather' }).dblclick();
@@ -244,9 +247,10 @@ fs.mkdirSync(out, { recursive: true });
     });
     const t = (iso) => new Date(iso).getTime();
     const lo = ev3.find((e) => e.type === 'lights_out');
-    check('lights out corrected, tap kept', lo.day === '2026-11-05' && Math.floor(lo.ts / 60000) === t('2026-11-05T22:40:00-05:00') / 60000 && lo.meta.correctedTs === t('2026-11-05T23:05:00-05:00'));
+    const loFix = ev3.find((e) => e.type === 'amend' && e.meta.target === lo.uid);
+    check('lights out corrected, tap kept', lo.day === '2026-11-05' && Math.floor(lo.ts / 60000) === t('2026-11-05T22:40:00-05:00') / 60000 && !lo.meta?.correctedTs && loFix?.meta.patch.correctedTs === t('2026-11-05T23:05:00-05:00'), JSON.stringify(loFix));
     const undone = new Set(ev3.filter((e) => e.type === 'undo').map((e) => e.meta.undoOf));
-    const live = (type) => ev3.filter((e) => e.type === type && !undone.has(e.id));
+    const live = (type) => ev3.filter((e) => e.type === type && !undone.has(e.uid));
     check('night up/back on last night, corrected', live('night_up').length === 1 && live('back_to_bed').length === 1 && live('back_to_bed')[0].ts === t('2026-11-06T03:15:00-05:00') && live('back_to_bed')[0].day === '2026-11-05', JSON.stringify(live('back_to_bed')));
     check('up is today', ev3.find((e) => e.type === 'up').day === '2026-11-06');
     await ctx3.close();

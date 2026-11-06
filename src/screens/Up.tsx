@@ -1,8 +1,7 @@
 import { useRef, useState } from 'preact/hooks';
 import type { Today } from '../lib/store';
-import { log, amend, todayKey } from '../lib/events';
+import { log, amend, todayKey, activeEvents, eventsForDay, undoEvent } from '../lib/events';
 import { fmtTime, minutesOfDay, hmToMinutes, nextDay, nightTs } from '../lib/day';
-import { db } from '../lib/db';
 import { go } from '../router';
 
 const LABELS = ['Rough', 'Meh', 'OK', 'Good', 'Great'];
@@ -33,8 +32,8 @@ export function UpScreen({ t }: { t: Today }) {
   const saveNight = async () => {
     const nd = night.day;
     const b = settings.dayBoundary;
-    if (lo?.id !== undefined && inBed && inBed !== hm(night.inBedTs)) {
-      await amend(lo.id, { meta: { ...(lo.meta ?? {}), correctedTs: nightTs(nd, inBed, b), correctedAt: Date.now() } });
+    if (lo && inBed && inBed !== hm(night.inBedTs)) {
+      await amend(lo, { meta: { correctedTs: nightTs(nd, inBed, b) } });
     }
     if (!lo && inBed) {
       await log('lights_out', { day: nd, ts: nightTs(nd, inBed, b), meta: { backfilled: true } });
@@ -42,10 +41,10 @@ export function UpScreen({ t }: { t: Today }) {
     // One retro "up in the night" window; only written if it isn't already what the log says.
     if (gotUp && upAt && (!firstAwake || upAt !== hm(firstAwake.up) || (backAt && backAt !== hm(firstAwake.back)))) {
       if (firstAwake) {
-        const evs = await db.events.where('[profileId+day]').equals(['mdf', nd]).toArray();
+        const act = activeEvents(await eventsForDay(nd));
         for (const type of ['night_up', 'back_to_bed'] as const) {
-          const e = evs.filter((x) => x.type === type).sort((a, c) => a.ts - c.ts)[0];
-          if (e?.id !== undefined) await db.events.add({ profileId: 'mdf', ts: Date.now(), day: nd, type: 'undo', key: type, meta: { undoOf: e.id, reason: 'corrected' } });
+          const e = act.filter((x) => x.type === type).sort((a, c) => a.ts - c.ts)[0];
+          if (e) await undoEvent(e, 'corrected');
         }
       }
       await log('night_up', { day: nd, ts: nightTs(nd, upAt, b), meta: { backfilled: true } });
@@ -64,12 +63,12 @@ export function UpScreen({ t }: { t: Today }) {
     setBusy(true);
     await saveNight();
     const meta = { nightWakings: wakings, wakeTarget: settings.wakeTarget, onTime };
-    if (rerate && existing?.id !== undefined) {
+    if (rerate && existing) {
       // Pre-boundary wake (e.g. 02:50 before a flight): the day hasn't rolled, but this is a new morning,
       // so file it on the next day rather than overwrite yesterday's keystone.
       const earlyNewMorning = !!state.lightsOut && existing.ts < state.lightsOut.ts && minutesOfDay(openedAt.current) < 3 * 60;
       if (earlyNewMorning) await log('up', { ts: openedAt.current, day: nextDay(day), value: quality, meta: { ...meta, earlyWake: true } });
-      else await amend(existing.id, { value: quality, meta });
+      else await amend(existing, { value: quality, meta });
     } else {
       const nowDay = todayKey(openedAt.current);
       await log('up', { ts: openedAt.current, day: nowDay, value: quality, meta });

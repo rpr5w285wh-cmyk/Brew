@@ -1,10 +1,11 @@
-import { db, PROFILE_ID, type Event, type EventType } from './db';
+import { db, PROFILE_ID, newUid, type Event, type EventType } from './db';
 import { logicalDay } from './day';
 
-// The event log is append-only. Nothing is ever deleted: an undo is itself an
-// event (`undo` with meta.undoOf = the id it cancels), and deriveDay() is the
-// single place that decides what the log means. Phase 2 reads derived views,
-// never raw rows.
+// The event log is append-only. Nothing is ever deleted or edited: an undo is
+// itself an event (`undo`, meta.undoOf = the uid it cancels), a correction is an
+// event (`amend`, meta.target = the uid it corrects), and activeEvents()/deriveDay()
+// are the single place that decides what the log means. Every event has a
+// permanent uid so the log can be merged across devices.
 
 let boundary = '03:00';
 export function setBoundary(b: string) { boundary = b; }
@@ -19,13 +20,20 @@ const DRINKS = new Set<EventType>(['water', 'coffee', 'tea', 'tisane']);
 
 export interface LogOpts { key?: string; value?: number | string; meta?: Record<string, unknown>; ts?: number; day?: string }
 
-export async function log(type: EventType, opts: LogOpts = {}): Promise<number | null> {
+/** Append one event. The only write path into the log. */
+export async function append(ev: Omit<Event, 'uid' | 'synced' | 'id' | 'profileId'>): Promise<string> {
+  const uid = newUid();
+  await db.events.add({ ...ev, profileId: PROFILE_ID, uid, synced: 0 });
+  return uid;
+}
+
+export async function log(type: EventType, opts: LogOpts = {}): Promise<string | null> {
   const ts = opts.ts ?? Date.now();
   const day = opts.day ?? logicalDay(ts, boundary);
 
   if (ONE_PER_DAY.has(type)) {
     const existing = activeEvents(await eventsForDay(day)).find((e) => e.type === type && (opts.key === undefined || e.key === opts.key));
-    if (existing) return existing.id ?? null;
+    if (existing) return existing.uid ?? null;
   }
   if (DRINKS.has(type)) {
     const prev = lastCounter.get(type) ?? 0;
@@ -39,45 +47,67 @@ export async function log(type: EventType, opts: LogOpts = {}): Promise<number |
     if (type === 'chip' && opts.key && cur.chips[opts.key] === opts.value) return null;
   }
 
-  const ev: Event = { profileId: PROFILE_ID, ts, day, type, key: opts.key, value: opts.value, meta: opts.meta };
-  return db.events.add(ev);
+  return append({ ts, day, type, key: opts.key, value: opts.value, meta: opts.meta });
 }
 
-/** Change the value/meta of an existing event in place (used for re-rating sleep). The timestamp is never touched. */
-export async function amend(id: number, patch: { value?: number | string; meta?: Record<string, unknown> }): Promise<void> {
-  await db.events.update(id, patch);
+/** Correct an earlier event (re-rating sleep, fixing lights-out time). Appends an `amend`; the original row is never touched. */
+export async function amend(target: Event, patch: { value?: number | string; meta?: Record<string, unknown> }): Promise<void> {
+  if (!target.uid) return;
+  await append({ ts: Date.now(), day: target.day, type: 'amend', key: target.type, value: patch.value, meta: { target: target.uid, patch: patch.meta ?? null, hasValue: patch.value !== undefined } });
+}
+
+/** Cancel one specific event. */
+export async function undoEvent(target: Event, reason?: string): Promise<void> {
+  if (!target.uid) return;
+  await append({ ts: Date.now(), day: target.day, type: 'undo', key: target.type, meta: { undoOf: target.uid, undoKey: target.key ?? null, ...(reason ? { reason } : {}) } });
 }
 
 export async function eventsForDay(day: string): Promise<Event[]> {
   return db.events.where('[profileId+day]').equals([PROFILE_ID, day]).sortBy('ts');
 }
 
-/** Ids cancelled by an `undo` event in this list. Legacy `habit_undo` rows cancel the latest prior habit_done with the same key. */
-export function undoneIds(evs: Event[]): Set<number> {
-  const out = new Set<number>();
+/** Uids cancelled by an `undo` event in this list. Legacy `habit_undo` rows cancel the latest prior habit_done with the same key. */
+export function undoneUids(evs: Event[]): Set<string> {
+  const out = new Set<string>();
+  const byLocalId = new Map<number, string>();
+  for (const e of evs) if (e.id !== undefined && e.uid) byLocalId.set(e.id, e.uid);
   const sorted = [...evs].sort((a, b) => a.ts - b.ts || (a.id ?? 0) - (b.id ?? 0));
   for (const e of sorted) {
-    if (e.type === 'undo' && typeof e.meta?.undoOf === 'number') out.add(e.meta.undoOf as number);
+    if (e.type === 'undo') {
+      const t = e.meta?.undoOf;
+      if (typeof t === 'string') out.add(t);
+      else if (typeof t === 'number' && byLocalId.has(t)) out.add(byLocalId.get(t)!);
+    }
     if (e.type === 'habit_undo' && e.key) {
-      const target = [...sorted].reverse().find((x) => x.type === 'habit_done' && x.key === e.key && x.ts <= e.ts && x.id !== undefined && !out.has(x.id));
-      if (target?.id !== undefined) out.add(target.id);
+      const target = [...sorted].reverse().find((x) => x.type === 'habit_done' && x.key === e.key && x.ts <= e.ts && x.uid && !out.has(x.uid));
+      if (target?.uid) out.add(target.uid);
     }
   }
   return out;
 }
 
-/** Events that still count: everything except undo markers and what they cancelled. */
+const MARKERS = new Set<EventType>(['undo', 'habit_undo', 'amend']);
+
+/** Events that still count, with corrections applied: undo/amend markers removed, cancelled events removed, amends folded in (last one wins). */
 export function activeEvents(evs: Event[]): Event[] {
-  const gone = undoneIds(evs);
-  return evs.filter((e) => e.type !== 'undo' && e.type !== 'habit_undo' && e.id !== undefined && !gone.has(e.id));
+  const gone = undoneUids(evs);
+  const live = evs.filter((e) => !MARKERS.has(e.type) && e.uid && !gone.has(e.uid)).map((e) => ({ ...e }));
+  const byUid = new Map(live.map((e) => [e.uid!, e]));
+  const amends = evs.filter((e) => e.type === 'amend' && e.uid && !gone.has(e.uid)).sort((a, b) => a.ts - b.ts);
+  for (const a of amends) {
+    const t = byUid.get(a.meta?.target as string);
+    if (!t) continue;
+    if (a.meta?.hasValue) t.value = a.value;
+    if (a.meta?.patch) t.meta = { ...(t.meta ?? {}), ...(a.meta.patch as Record<string, unknown>) };
+  }
+  return live;
 }
 
 /** Undo the most recent still-active event of a type/key on a day. Appends an `undo` event; deletes nothing. */
 export async function undoLast(day: string, type: EventType, key?: string): Promise<void> {
   const act = activeEvents(await eventsForDay(day));
   const last = [...act].reverse().find((e) => e.type === type && (key === undefined || e.key === key));
-  if (last?.id === undefined) return;
-  await db.events.add({ profileId: PROFILE_ID, ts: Date.now(), day, type: 'undo', key: type, meta: { undoOf: last.id, undoKey: last.key ?? null } });
+  if (last) await undoEvent(last);
 }
 
 export interface DayState {
