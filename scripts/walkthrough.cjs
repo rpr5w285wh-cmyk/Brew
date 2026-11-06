@@ -200,6 +200,93 @@ fs.mkdirSync(out, { recursive: true });
     await ctx2.close();
   }
 
+  // Night that didn't go to plan: lights out 22:40, up 01:10 (ate something), back 02:40, morning correction.
+  {
+    const ctx3 = await browser.newContext({ ...devices['iPhone 14'], locale: 'en-CA', timezoneId: 'America/Toronto' });
+    const p3 = await ctx3.newPage();
+    await p3.clock.install({ time: new Date('2026-11-05T22:40:00-05:00') });
+    await p3.goto(base, { waitUntil: 'load' });
+    await p3.getByRole('heading', { name: 'Morning' }).waitFor();
+    // morning order: Teeth above the session
+    const titles = await p3.locator('.card').nth(0).locator('.title').allTextContents();
+    const ti = titles.indexOf('Teeth'); const si = titles.findIndex((x) => /Yoga|Session|Stretch|Min|Morning/.test(x) && x !== 'Teeth');
+    check('Teeth above the session', ti > -1 && si > -1 && ti < si, JSON.stringify(titles));
+    await p3.locator('.row', { hasText: 'Wind-down' }).locator('.rowmain').click();
+    await p3.getByRole('button', { name: 'No', exact: true }).click();
+    await p3.getByRole('button', { name: 'Lights out' }).click();
+    await p3.getByText('Good night.').waitFor();
+    await p3.clock.setSystemTime(new Date('2026-11-06T01:10:00-05:00'));
+    await p3.getByRole('button', { name: "Can't sleep — got up" }).click();
+    await p3.getByText("Can't sleep.").waitFor();
+    await p3.getByRole('button', { name: 'Ate something' }).click();
+    await p3.clock.setSystemTime(new Date('2026-11-06T02:40:00-05:00'));
+    await p3.getByRole('button', { name: 'Back to bed' }).click();
+    await p3.getByText(/up 1× since/).waitFor();
+    // morning: day rolls at 03:00; Up screen shows last night pre-filled
+    await p3.clock.setSystemTime(new Date('2026-11-06T06:35:00-05:00'));
+    await p3.reload({ waitUntil: 'load' });
+    await p3.getByRole('heading', { name: 'Morning' }).waitFor();
+    await p3.locator('.row', { hasText: 'Up' }).first().locator('.rowmain').click();
+    await p3.getByRole('heading', { name: 'Last night' }).waitFor();
+    const vals = await p3.locator('input[type=time]').evaluateAll((els) => els.map((e) => e.value));
+    check('last night pre-filled', JSON.stringify(vals) === JSON.stringify(['22:40', '01:10', '02:40']), JSON.stringify(vals));
+    check('ate-late carried from the night', await p3.locator('.chips[aria-label="Ate after 20:00"] .chip.on').textContent() === 'Yes');
+    // correct: actually lights out at 23:05, back to bed 03:15
+    await p3.getByLabel('Lights out time').fill('23:05');
+    await p3.getByLabel('Back to bed at').fill('03:15');
+    await p3.screenshot({ path: `${out}/08-up-last-night.png`, fullPage: true });
+    await p3.getByRole('button', { name: 'Good' }).click();
+    await p3.getByRole('button', { name: "I'm up" }).click();
+    await p3.getByText(/Up at 06:35/).waitFor();
+    const ev3 = await p3.evaluate(async () => {
+      const req = indexedDB.open('brew'); const dbx = await new Promise((r) => { req.onsuccess = () => r(req.result); });
+      return new Promise((r) => { const q = dbx.transaction('events').objectStore('events').getAll(); q.onsuccess = () => r(q.result); });
+    });
+    const t = (iso) => new Date(iso).getTime();
+    const lo = ev3.find((e) => e.type === 'lights_out');
+    check('lights out corrected, tap kept', lo.day === '2026-11-05' && Math.floor(lo.ts / 60000) === t('2026-11-05T22:40:00-05:00') / 60000 && lo.meta.correctedTs === t('2026-11-05T23:05:00-05:00'));
+    const undone = new Set(ev3.filter((e) => e.type === 'undo').map((e) => e.meta.undoOf));
+    const live = (type) => ev3.filter((e) => e.type === type && !undone.has(e.id));
+    check('night up/back on last night, corrected', live('night_up').length === 1 && live('back_to_bed').length === 1 && live('back_to_bed')[0].ts === t('2026-11-06T03:15:00-05:00') && live('back_to_bed')[0].day === '2026-11-05', JSON.stringify(live('back_to_bed')));
+    check('up is today', ev3.find((e) => e.type === 'up').day === '2026-11-06');
+    await ctx3.close();
+  }
+
+  // Later: move the morning session to the day on purpose
+  {
+    const ctx4 = await browser.newContext({ ...devices['iPhone 14'], locale: 'en-CA', timezoneId: 'America/Toronto' });
+    const p4 = await ctx4.newPage();
+    await p4.clock.install({ time: new Date('2026-11-06T06:40:00-05:00') });
+    await p4.goto(base, { waitUntil: 'load' });
+    await p4.getByRole('heading', { name: 'Morning' }).waitFor();
+    const planned = (await p4.locator('.row', { hasText: /while the coffee brews/ }).locator('.title').textContent()).trim();
+    await p4.getByRole('button', { name: 'Do the session later today' }).click();
+    await p4.getByText('Moved to the day — Yoga break').waitFor();
+    check('break no longer optional', await p4.locator('.row', { hasText: 'Yoga break' }).getByText(`Today's session · ${planned}`).isVisible());
+    // finish the rest of the morning chain → Next is the Yoga break
+    await p4.locator('.row', { hasText: 'Up' }).first().locator('.rowmain').click();
+    await p4.getByRole('button', { name: 'Good' }).click();
+    await p4.getByRole('button', { name: "I'm up" }).click();
+    await p4.getByRole('button', { name: 'Skip the breather' }).click();
+    await p4.locator('.row', { hasText: 'Teeth' }).first().locator('.rowmain').click();
+    await p4.locator('.row', { hasText: 'Shower' }).locator('.rowmain').click();
+    await p4.waitForTimeout(300);
+    check('Next is the yoga break after Later', (await p4.locator('.next-title').textContent()).trim() === 'Yoga break');
+    await p4.screenshot({ path: `${out}/09-later.png`, fullPage: true });
+    await p4.locator('.next').click();
+    await p4.getByText("Today's session, moved from the morning.").waitFor();
+    check('break plays the morning pick', (await p4.locator('.stitle').first().textContent()).trim() === planned);
+    await p4.getByRole('button', { name: 'Done', exact: true }).click();
+    await p4.waitForURL((u) => !u.hash.includes('session'));
+    const ev4 = await p4.evaluate(async () => {
+      const req = indexedDB.open('brew'); const dbx = await new Promise((r) => { req.onsuccess = () => r(req.result); });
+      return new Promise((r) => { const q = dbx.transaction('events').objectStore('events').getAll(); q.onsuccess = () => r(q.result); });
+    });
+    const sd4 = ev4.filter((e) => e.type === 'session_done');
+    check('moved session logged as the session (slot day)', sd4.length === 1 && sd4[0].meta.slot === 'day' && ev4.some((e) => e.type === 'session_later'));
+    await ctx4.close();
+  }
+
   console.log(JSON.stringify({ counts, plan: d.plans[0], checks, errors }, null, 2));
   const failed = checks.filter((c) => !c.ok).length;
   await browser.close();

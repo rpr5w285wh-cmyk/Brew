@@ -21,6 +21,20 @@ export function logicalDay(ts: number, boundary = '03:00'): string {
   return dateKey(d);
 }
 
+/** The day key before a given key. */
+export function prevDay(key: string): string {
+  const [y, mo, d] = key.split('-').map(Number);
+  return dateKey(new Date(y, mo - 1, d - 1));
+}
+
+/** Timestamp for "HH:MM" on the night that follows logical day `key`: evening times stay on that date, morning times (before noon) fall after midnight. */
+export function nightTs(key: string, hm: string, _boundary = '03:00'): number {
+  const [y, mo, d] = key.split('-').map(Number);
+  const { h, m } = parseHM(hm);
+  const after = h < 12;
+  return new Date(y, mo - 1, d + (after ? 1 : 0), h, m, 0, 0).getTime();
+}
+
 /** The day key after a given key. */
 export function nextDay(key: string): string {
   const [y, mo, d] = key.split('-').map(Number);

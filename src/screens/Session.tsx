@@ -70,7 +70,9 @@ export function SessionScreen({ t }: { t: Today }) {
   const breathMode = query().get('breath') === '1';
   const dayMode = !breathMode && query().get('slot') === 'day';
   const breath = breathMode ? sessions.find((s) => s.id === 'ywa-calming-breath') ?? null : null;
-  const current = breath ?? (dayMode ? daySession : session);
+  // Moved to the day on purpose: the break plays the morning's own pick (and keeps its swap).
+  const movedLater = dayMode && !!state.sessionLater && !state.sessionDone;
+  const current = breath ?? (dayMode && !movedLater ? daySession : session);
   const off = state.context === 'off';
   // A yoga break taken before the morning session is done stands in for it (logged as the session, slot 'day').
   const caughtUp = state.sessionDone?.meta?.slot === 'day';
@@ -96,7 +98,7 @@ export function SessionScreen({ t }: { t: Today }) {
     go('today');
   };
 
-  const canSwap = !dayMode && !!swap && !plan?.swapped && !alreadyDone && !off;
+  const canSwap = (!dayMode || movedLater) && !!swap && !plan?.swapped && !alreadyDone && !off;
   const doSwap = async () => { if (!canSwap) return; await swapPlan(day); t.refresh(); };
 
   return (
@@ -133,7 +135,7 @@ export function SessionScreen({ t }: { t: Today }) {
             </div>
           </div>
           <button class="btn" onClick={() => done('video')} disabled={busy}>Done</button>
-          {dayMode ? (
+          {dayMode && !movedLater ? (
             <button class="btn quiet" onClick={() => done('floor')} disabled={busy}>Floor only</button>
           ) : (
             <>
@@ -144,7 +146,7 @@ export function SessionScreen({ t }: { t: Today }) {
               {swap && !plan?.swapped && <p class="note muted">Swap once: {swap.title}</p>}
             </>
           )}
-          {dayMode && <p class="note muted">{catchUp ? "Missed the morning session? This counts as today's session." : 'Optional. A break on top of the morning session — skipping it costs nothing.'}</p>}
+          {dayMode && <p class="note muted">{movedLater ? "Today's session, moved from the morning." : catchUp ? "Missed the morning session? This counts as today's session." : 'Optional. A break on top of the morning session — skipping it costs nothing.'}</p>}
         </>
       )}
 

@@ -123,3 +123,5 @@ details summary { cursor: pointer; padding: 12px 14px; font-weight: 600; }
 .goodnight .btn { margin-top: 20px; }
 
 .counter-note { padding: 10px 14px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); }
+
+.undo.later { border: 1px solid var(--line); margin-right: 6px; color: var(--ink-2); }

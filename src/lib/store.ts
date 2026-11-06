@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'preact/hooks';
 import { liveQuery } from 'dexie';
 import { db, PROFILE_ID, type Settings, type Session, type Habit, type PlanDay, type TemplateRow } from './db';
 import { DEFAULT_SETTINGS, ensureSeeded } from './seed';
+import { prevDay } from './day';
 import { eventsForDay, deriveDay, setBoundary, todayKey, type DayState } from './events';
 import { planFor } from './picker';
 
@@ -10,6 +11,8 @@ export interface Today {
   day: string;
   settings: Settings;
   state: DayState;
+  /** Yesterday's logical day — last night's lights out, chips and wakings. */
+  prev: DayState;
   plan: PlanDay | null;
   session: Session | null;
   swap: Session | null;
@@ -25,6 +28,7 @@ export function useToday(): Today {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [day, setDay] = useState(todayKey());
   const [state, setState] = useState<DayState>(deriveDay(day, []));
+  const [prev, setPrev] = useState<DayState>(deriveDay(prevDay(day), []));
   const [plan, setPlan] = useState<PlanDay | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [swap, setSwap] = useState<Session | null>(null);
@@ -61,11 +65,13 @@ export function useToday(): Today {
   // live events for today
   useEffect(() => {
     if (!ready) return;
+    const pd = prevDay(day);
+    const sub2 = liveQuery(() => eventsForDay(pd)).subscribe({ next: (evs) => setPrev(deriveDay(pd, evs)), error: (e) => console.error(e) });
     const sub = liveQuery(() => eventsForDay(day)).subscribe({
       next: (evs) => setState(deriveDay(day, evs)),
       error: (e) => console.error(e),
     });
-    return () => sub.unsubscribe();
+    return () => { sub.unsubscribe(); sub2.unsubscribe(); };
   }, [ready, day]);
 
   // roll over at the day boundary while the app is open, and whenever the app comes back to the foreground
@@ -79,7 +85,7 @@ export function useToday(): Today {
     return () => { clearInterval(id); document.removeEventListener('visibilitychange', onVis); removeEventListener('pageshow', check); removeEventListener('focus', check); };
   }, [day, refresh]);
 
-  return { ready, day, settings, state, plan, session, swap, daySession, habits, sessions, template, refresh };
+  return { ready, day, settings, state, prev, plan, session, swap, daySession, habits, sessions, template, refresh };
 }
 
 export async function saveSettings(patch: Partial<Settings>): Promise<void> {

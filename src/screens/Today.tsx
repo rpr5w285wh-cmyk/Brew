@@ -34,7 +34,7 @@ function Step({ done, active, title, hint, onTap, onUndo, undoLabel, children }:
 }
 
 export function TodayScreen({ t }: { t: Today }) {
-  const { day, state, settings, session, habits, sessions, daySession } = t;
+  const { day, state, prev, settings, session, habits, sessions, daySession } = t;
   const off = state.context === 'off';
   const [toast, setToast] = useState<string | null>(null);
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 1400); };
@@ -69,6 +69,7 @@ export function TodayScreen({ t }: { t: Today }) {
     ? (doneSession ? doneSession.title : 'Written fallback')
     : off ? 'Session (written fallback)' : session ? session.title : 'Session';
   const caughtUp = state.sessionDone?.meta?.slot === 'day';
+  const movedLater = !!state.sessionLater && !state.sessionDone;
   const breakDone = state.daySession ?? (caughtUp ? state.sessionDone : undefined);
   const sessionHint = caughtUp
     ? `Done at ${fmtTime(state.sessionDone!.ts)} as a yoga break — counts`
@@ -116,19 +117,27 @@ export function TodayScreen({ t }: { t: Today }) {
       ),
     },
     {
-      key: 'session', label: off ? 'Session (fallback)' : session ? `Session · ${session.titleMinutes} min` : 'Session', done: !!state.sessionDone, go: () => go('session'),
-      el: (active) => <Step done={!!state.sessionDone} active={active} title={sessionTitle} hint={sessionHint}
-        onTap={state.sessionDone ? undefined : () => go('session')} onUndo={() => once(() => undoLast(day, 'session_done'))} undoLabel="Undo session" />,
-    },
-    {
       key: 'teeth_am', label: 'Teeth', done: h('teeth_am'), go: () => doHabit('teeth_am'),
       el: (active) => <Step done={h('teeth_am')} active={active} title="Teeth" onTap={h('teeth_am') ? undefined : () => doHabit('teeth_am')} onUndo={() => undoHabit('teeth_am')} />,
+    },
+    {
+      key: 'session', label: off ? 'Session (fallback)' : session ? `Session · ${session.titleMinutes} min` : 'Session', done: !!state.sessionDone || movedLater, go: () => go('session'),
+      el: (active) => movedLater ? (
+        <Step done active={false} title={sessionTitle} hint="Moved to the day — Yoga break" onTap={() => go('session', { slot: 'day' })}
+          onUndo={() => once(() => undoLast(day, 'session_later'))} undoLabel="Bring the session back to the morning" />
+      ) : (
+        <Step done={!!state.sessionDone} active={active} title={sessionTitle} hint={sessionHint}
+          onTap={state.sessionDone ? undefined : () => go('session')} onUndo={() => once(() => undoLast(day, 'session_done'))} undoLabel="Undo session">
+          {!state.sessionDone && <button class="undo later" onClick={() => once(() => log('session_later'))} aria-label="Do the session later today">Later</button>}
+        </Step>
+      ),
     },
     {
       key: 'shower', label: 'Shower', done: h('shower'), go: () => doHabit('shower'),
       el: (active) => <Step done={h('shower')} active={active} title="Shower" hint={off ? 'Any time today counts' : undefined} onTap={h('shower') ? undefined : () => doHabit('shower')} onUndo={() => undoHabit('shower')} />,
     },
   ];
+  const breakItem: Item = { key: 'daybreak', label: 'Yoga break', done: false, go: () => go('session', { slot: 'day' }), el: () => <></> };
   const outsideItem: Item = { key: 'outside', label: 'Outside', done: h('outside'), go: () => doHabit('outside'), el: () => <></> };
   const windItem: Item = { key: 'wind', label: 'Wind-down', done: !!state.lightsOut, go: () => go('winddown'), el: () => <></> };
 
@@ -136,23 +145,43 @@ export function TodayScreen({ t }: { t: Today }) {
   let next: Item | null = null;
   if (!state.lightsOut) {
     if (isEvening) next = windItem;
-    else next = morning.find((m) => !m.done) ?? (!outsideItem.done ? outsideItem : null) ?? windItem;
+    else next = morning.find((m) => !m.done) ?? (movedLater ? breakItem : null) ?? (!outsideItem.done ? outsideItem : null) ?? windItem;
   }
   const activeKey = next?.key ?? null;
 
-  if (state.lightsOut) {
+  // Night view: tonight's lights out, or last night still open after the 03:00 rollover (got up and not back yet).
+  const nightOpenPrev = !state.lightsOut && !state.up && !!prev.lightsOut && prev.awake.some((a) => a.back === undefined);
+  const night = state.lightsOut ? state : nightOpenPrev ? prev : null;
+  const awakeNow = night ? night.awake.find((a) => a.back === undefined) : undefined;
+
+  if (night) {
+    const nd = night.day;
+    const ateLate = night.chips['ate_late'] === 'yes';
     return (
       <main class="screen">
         <Header day={day} off={off} toggleOff={toggleOff} />
-        <div class="card goodnight">
-          <div class="muted">Lights out at {fmtTime(state.lightsOut.ts)}</div>
-          <div class="big">Good night.</div>
-          <div class="muted">Tap Up in the morning.</div>
-          <button class="btn quiet" onClick={() => once(() => undoLast(day, 'lights_out'))}>Not yet — undo lights out</button>
-        </div>
+        {awakeNow ? (
+          <div class="card goodnight">
+            <div class="muted">Up since {fmtTime(awakeNow.up)} · lights out was {fmtTime(night.inBedTs!)}</div>
+            <div class="big">Can't sleep.</div>
+            <div class="muted">That's logged. Tap when you're back in bed.</div>
+            <div class="chips" style="justify-content:center;padding-top:14px">
+              <button class={`chip ${ateLate ? 'on' : ''}`} aria-pressed={ateLate} onClick={() => once(() => log('chip', { key: 'ate_late', value: ateLate ? 'no' : 'yes', day: nd }))}>Ate something</button>
+            </div>
+            <button class="btn soft" onClick={() => once(() => log('back_to_bed', { day: nd }))}>Back to bed</button>
+          </div>
+        ) : (
+          <div class="card goodnight">
+            <div class="muted">Lights out at {fmtTime(night.inBedTs!)}{night.awake.length ? ` · up ${night.awake.length}× since` : ''}</div>
+            <div class="big">Good night.</div>
+            <div class="muted">Tap Up in the morning.</div>
+            <button class="btn quiet" onClick={() => once(() => log('night_up', { day: nd }))}>Can't sleep — got up</button>
+            {!night.awake.length && <button class="undo" style="margin-top:8px" onClick={() => once(() => undoLast(nd, 'lights_out'))}>Not yet — undo lights out</button>}
+          </div>
+        )}
         <div class="card" style="margin-top:12px">
-          <Counter label="Water" sub={fluidsSub} count={state.water} onMinus={() => once(() => undoLast(day, 'water'))} onPlus={() => log('water')} />
-          <Counter label="Tisane" sub="no caffeine" count={state.tisane} onMinus={() => once(() => undoLast(day, 'tisane'))} onPlus={() => log('tisane')} />
+          <Counter label="Water" sub={night === state ? fluidsSub : 'night'} count={night.water} onMinus={() => once(() => undoLast(nd, 'water'))} onPlus={() => log('water', { day: nd })} />
+          <Counter label="Tisane" sub="no caffeine" count={night.tisane} onMinus={() => once(() => undoLast(nd, 'tisane'))} onPlus={() => log('tisane', { day: nd })} />
         </div>
         {toast && <div class="toast">{toast}</div>}
       </main>
@@ -186,11 +215,13 @@ export function TodayScreen({ t }: { t: Today }) {
 
       <h2>Day</h2>
       <div class="card">
-        <Step done={!!breakDone} active={false} title="Yoga break"
+        <Step done={!!breakDone} active={activeKey === 'daybreak'} title="Yoga break"
           hint={breakDone
             ? (breakDone.key === 'fallback' ? `Fallback at ${fmtTime(breakDone.ts)} — counts` : `${sessions.find((x) => x.id === breakDone.key)?.title ?? 'Done'} · ${fmtTime(breakDone.ts)}`) + (caughtUp && !state.daySession ? " · counted as today's session" : '')
-            : (state.sessionDone ? 'Optional' : "Optional · counts as today's session if the morning one didn't happen")
-              + (off || !daySession ? ' · written fallback, 2 min' : ` · ${daySession.title} · ${daySession.titleMinutes} min`)}
+            : movedLater
+              ? "Today's session" + (off || !session ? ' · written fallback, 2 min' : ` · ${session.title} · ${session.titleMinutes} min`)
+              : (state.sessionDone ? 'Optional' : "Optional · counts as today's session if the morning one didn't happen")
+                + (off || !daySession ? ' · written fallback, 2 min' : ` · ${daySession.title} · ${daySession.titleMinutes} min`)}
           onTap={breakDone ? undefined : () => go('session', { slot: 'day' })}
           onUndo={() => once(() => (state.daySession ? undoLast(day, 'day_session') : undoLast(day, 'session_done')))} undoLabel="Undo yoga break" />
         <Step done={h('outside')} active={activeKey === 'outside'} title="Outside"
