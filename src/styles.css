@@ -126,5 +126,5 @@ details summary { cursor: pointer; padding: 12px 14px; font-weight: 600; }
 
 .undo.later { border: 1px solid var(--line); margin-right: 6px; color: var(--ink-2); }
 
-.browser-warn { margin: 4px 0 10px; padding: 12px 14px; border-radius: 12px; background: var(--active-bg); border: 1px solid var(--accent); font-size: 15px; color: var(--ink); }
+.browser-warn { display: block; width: 100%; text-align: left; font: inherit; margin: 4px 0 10px; padding: 12px 14px; border-radius: 12px; background: var(--active-bg); border: 1px solid var(--accent); font-size: 15px; color: var(--ink); }
 .browser-warn strong { display: block; margin-bottom: 2px; }

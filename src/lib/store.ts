@@ -5,6 +5,9 @@ import { DEFAULT_SETTINGS, ensureSeeded } from './seed';
 import { prevDay } from './day';
 import { eventsForDay, deriveDay, setBoundary, todayKey, type DayState } from './events';
 import { planFor } from './picker';
+import { initSync, pullBeforePlanning, markStateDirty } from './sync';
+
+let syncStarted: Promise<void> | null = null;
 
 export interface Today {
   ready: boolean;
@@ -43,9 +46,16 @@ export function useToday(): Today {
     let cancelled = false;
     (async () => {
       await ensureSeeded();
-      const s: Settings = { ...DEFAULT_SETTINGS, ...((await db.settings.get(PROFILE_ID)) ?? {}) };
+      syncStarted ??= initSync().catch(() => undefined);
+      await syncStarted;
+      let s: Settings = { ...DEFAULT_SETTINGS, ...((await db.settings.get(PROFILE_ID)) ?? {}) };
       setBoundary(s.dayBoundary);
       const d = todayKey();
+      // New day and no plan yet on this device: give another device's plan a moment to arrive.
+      if (!(await db.plan_days.get([PROFILE_ID, d]))) {
+        await pullBeforePlanning();
+        s = { ...DEFAULT_SETTINGS, ...((await db.settings.get(PROFILE_ID)) ?? {}) };
+      }
       const [p, h, all, t] = await Promise.all([
         planFor(d, s),
         db.habits.where('profileId').equals(PROFILE_ID).sortBy('order'),
@@ -74,6 +84,13 @@ export function useToday(): Today {
     return () => { sub.unsubscribe(); sub2.unsubscribe(); };
   }, [ready, day]);
 
+  // pulled changes from another device: re-read settings, template and plan
+  useEffect(() => {
+    const on = () => refresh();
+    addEventListener('brew-synced', on);
+    return () => removeEventListener('brew-synced', on);
+  }, [refresh]);
+
   // roll over at the day boundary while the app is open, and whenever the app comes back to the foreground
   useEffect(() => {
     const check = () => { if (todayKey() !== day) refresh(); };
@@ -91,6 +108,7 @@ export function useToday(): Today {
 export async function saveSettings(patch: Partial<Settings>): Promise<void> {
   const cur = (await db.settings.get(PROFILE_ID)) ?? DEFAULT_SETTINGS;
   await db.settings.put({ ...cur, ...patch });
+  markStateDirty('settings');
 }
 
 export async function requestPersistence(): Promise<boolean> {

@@ -20,10 +20,15 @@ const DRINKS = new Set<EventType>(['water', 'coffee', 'tea', 'tisane']);
 
 export interface LogOpts { key?: string; value?: number | string; meta?: Record<string, unknown>; ts?: number; day?: string }
 
+let onAppend: (() => void) | null = null;
+/** Sync registers here to hear about new local events. */
+export function setOnAppend(f: () => void): void { onAppend = f; }
+
 /** Append one event. The only write path into the log. */
 export async function append(ev: Omit<Event, 'uid' | 'synced' | 'id' | 'profileId'>): Promise<string> {
   const uid = newUid();
   await db.events.add({ ...ev, profileId: PROFILE_ID, uid, synced: 0 });
+  onAppend?.();
   return uid;
 }
 

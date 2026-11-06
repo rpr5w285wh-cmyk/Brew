@@ -140,7 +140,7 @@ fs.mkdirSync(out, { recursive: true });
 
   // Settings: edit a non-today weekday → today's plan untouched
   const planBefore = (await events()).plans[0];
-  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.waitForURL(/#\/settings/);
   const notToday = (new Date().getDay() + 3) % 7;
   const sel = page.locator('.field select').nth(2 + notToday); // theme, weighDay, then Sun..Sat

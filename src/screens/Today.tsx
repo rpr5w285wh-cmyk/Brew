@@ -5,6 +5,7 @@ import { log, undoLast } from '../lib/events';
 import { fmtTime, minusMinutes, prettyDay, weekdayOf, minutesOfDay, hmToMinutes } from '../lib/day';
 import { go } from '../router';
 import { isInstalled } from '../lib/store';
+import { useSyncStatus } from './SyncCard';
 
 interface StepProps {
   done: boolean;
@@ -251,12 +252,14 @@ export function TodayScreen({ t }: { t: Today }) {
 }
 
 function Header({ day, off, toggleOff }: { day: string; off: boolean; toggleOff: () => void }) {
+  const sync = useSyncStatus();
   return (
     <>
-    {!isInstalled() && (
-      <div class="browser-warn" role="note">
-        <strong>You're in a browser, not the Brew app.</strong> Taps here are saved in this browser only and won't show up in the Brew icon on your home screen. Open Brew from the home screen for daily use.
-      </div>
+    {!sync.signedIn && (
+      <button class="browser-warn" onClick={() => go('settings')}>
+        <strong>{isInstalled() ? 'Not syncing yet.' : "You're in a browser, not the Brew app."}</strong>
+        {isInstalled() ? 'Taps are saved on this phone only. Sign in under Settings → Sync to share them across devices.' : 'Taps here stay in this browser. Sign in under Settings → Sync to merge them with your other devices.'}
+      </button>
     )}
     <div class="topbar">
       <div>

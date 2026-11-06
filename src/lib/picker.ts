@@ -1,6 +1,7 @@
 import { db, PROFILE_ID, type PlanDay, type Session, type Settings, type Category } from './db';
 import { weekdayOf, dayRange } from './day';
 import { activeEvents, log } from './events';
+import { markStateDirty } from './sync';
 
 /**
  * Session picker. Runs once per logical day and is memoised in plan_days.
@@ -14,6 +15,7 @@ export async function planFor(day: string, settings: Settings): Promise<PlanDay>
     if (existing.daySessionId === undefined) {
       const withDay = { ...existing, daySessionId: await pickDaySession(day, settings, [existing.sessionId, existing.swapId]) };
       await db.plan_days.put(withDay);
+      markStateDirty(`plan:${day}`);
       return withDay;
     }
     return existing;
@@ -46,6 +48,7 @@ export async function planFor(day: string, settings: Settings): Promise<PlanDay>
     daySessionId: await pickDaySession(day, settings, [pool[0]?.id ?? null, pool[1]?.id ?? null]),
   };
   await db.plan_days.put(plan);
+  markStateDirty(`plan:${day}`);
   return plan;
 }
 
@@ -55,6 +58,7 @@ export async function swapPlan(day: string): Promise<PlanDay | undefined> {
   if (!plan || !plan.swapId || plan.swapped) return plan;
   const next: PlanDay = { ...plan, sessionId: plan.swapId, swapId: plan.sessionId, swapped: true };
   await db.plan_days.put(next);
+  markStateDirty(`plan:${day}`);
   await log('swap', { key: next.sessionId ?? undefined, meta: { from: plan.sessionId, to: next.sessionId } });
   return next;
 }

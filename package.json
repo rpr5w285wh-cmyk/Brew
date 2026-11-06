@@ -13,6 +13,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@supabase/supabase-js": "^2.119.0",
     "dexie": "^4.4.7",
     "preact": "^11.1.1",
     "preact-iso": "^2.12.2"

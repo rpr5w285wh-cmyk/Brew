@@ -6,6 +6,8 @@ import { CATEGORY_LABEL } from '../lib/seed';
 import { log } from '../lib/events';
 import { exportJSON, exportEventsCSV, importJSON, shareOrDownload, markExported } from '../lib/exportData';
 import { replan } from '../lib/picker';
+import { markStateDirty } from '../lib/sync';
+import { SyncCard } from './SyncCard';
 import { weekdayOf } from '../lib/day';
 import { minusMinutes } from '../lib/day';
 import { go } from '../router';
@@ -29,6 +31,7 @@ export function SettingsScreen({ t }: { t: Today }) {
 
   const setTemplate = async (weekday: number, category: Category) => {
     await db.template.put({ profileId: PROFILE_ID, weekday, category });
+    markStateDirty('template');
     await maybeReplanToday(weekday === weekdayOf(t.day));
     t.refresh();
   };
@@ -113,6 +116,9 @@ export function SettingsScreen({ t }: { t: Today }) {
         })}
       </div>
       <p class="note muted">Step-down is always one tap. Step-up is never set here — it's proposed at the weekly review after two consistent weeks.</p>
+
+      <h2>Sync</h2>
+      <SyncCard />
 
       <h2>Data</h2>
       <div class="card">
