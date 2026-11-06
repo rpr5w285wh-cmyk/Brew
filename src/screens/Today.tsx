@@ -4,6 +4,7 @@ import type { Today } from '../lib/store';
 import { log, undoLast } from '../lib/events';
 import { fmtTime, minusMinutes, prettyDay, weekdayOf, minutesOfDay, hmToMinutes } from '../lib/day';
 import { go } from '../router';
+import { isInstalled } from '../lib/store';
 
 interface StepProps {
   done: boolean;
@@ -245,6 +246,12 @@ export function TodayScreen({ t }: { t: Today }) {
 
 function Header({ day, off, toggleOff }: { day: string; off: boolean; toggleOff: () => void }) {
   return (
+    <>
+    {!isInstalled() && (
+      <div class="browser-warn" role="note">
+        <strong>You're in a browser, not the Brew app.</strong> Taps here are saved in this browser only and won't show up in the Brew icon on your home screen. Open Brew from the home screen for daily use.
+      </div>
+    )}
     <div class="topbar">
       <div>
         <h1>Brew</h1>
@@ -255,6 +262,7 @@ function Header({ day, off, toggleOff }: { day: string; off: boolean; toggleOff:
         <button class="iconbtn" onClick={() => go('settings')} aria-label="Settings">⚙︎</button>
       </div>
     </div>
+    </>
   );
 }
 

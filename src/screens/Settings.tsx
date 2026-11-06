@@ -1,6 +1,6 @@
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import type { Today } from '../lib/store';
-import { saveSettings } from '../lib/store';
+import { saveSettings, isInstalled } from '../lib/store';
 import { db, PROFILE_ID, type Category, type Tier, type Settings } from '../lib/db';
 import { CATEGORY_LABEL } from '../lib/seed';
 import { log } from '../lib/events';
@@ -16,6 +16,8 @@ const CATS: Category[] = ['wakeup', 'stretch', 'basics', 'restorative', 'energy'
 export function SettingsScreen({ t }: { t: Today }) {
   const { settings, template, habits, sessions } = t;
   const [msg, setMsg] = useState<string | null>(null);
+  const [eventCount, setEventCount] = useState<number | null>(null);
+  useEffect(() => { db.events.count().then(setEventCount); }, []);
   const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(null), 1800); };
 
   const set = async (patch: Parameters<typeof saveSettings>[0]) => { await saveSettings(patch); t.refresh(); };
@@ -114,11 +116,13 @@ export function SettingsScreen({ t }: { t: Today }) {
 
       <h2>Data</h2>
       <div class="card">
+        <div class="field"><label>Saved in</label><span class="muted">{isInstalled() ? 'Brew app (home screen)' : 'This browser only'}</span></div>
+        <div class="field"><label>Taps logged</label><span class="muted">{eventCount ?? '…'}</span></div>
         <div class="field"><label>Export backup (JSON)</label><button class="pill ghost" onClick={doExport}>Export</button></div>
         <div class="field"><label>Export events (CSV)</label><button class="pill ghost" onClick={doCSV}>Export</button></div>
         <div class="field"><label>Restore from backup</label><input type="file" accept="application/json,.json" onChange={doImport} style="max-width:170px" /></div>
       </div>
-      <p class="note muted">Everything lives on this phone. Export at the weekly review; a lost phone means lost logs otherwise.</p>
+      <p class="note muted">The home-screen app and the browser keep separate data on iPhone; to move data, Export here and Restore in the other. Everything lives on this phone. Export at the weekly review; a lost phone means lost logs otherwise.</p>
 
       <h2>Library</h2>
       <div class="card library">

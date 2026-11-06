@@ -99,3 +99,8 @@ export async function requestPersistence(): Promise<boolean> {
   } catch { /* ignore */ }
   return false;
 }
+
+/** True when running as the installed home-screen app (its own storage, separate from Safari's). */
+export function isInstalled(): boolean {
+  return matchMedia('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+}
