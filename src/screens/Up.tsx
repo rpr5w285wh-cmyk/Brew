@@ -1,7 +1,7 @@
 import { useRef, useState } from 'preact/hooks';
 import type { Today } from '../lib/store';
 import { log, amend, todayKey, activeEvents, eventsForDay, undoEvent } from '../lib/events';
-import { fmtTime, minutesOfDay, hmToMinutes, nextDay, nightTs } from '../lib/day';
+import { fmtTime, minutesOfDay, hmToMinutes, nextDay, nightTs, wakeFor } from '../lib/day';
 import { go } from '../router';
 
 const LABELS = ['Rough', 'Meh', 'OK', 'Good', 'Great'];
@@ -56,13 +56,14 @@ export function UpScreen({ t }: { t: Today }) {
   };
 
   const wakeTs = existing?.ts ?? openedAt.current;
-  const onTime = minutesOfDay(wakeTs) <= hmToMinutes(settings.wakeTarget) + 10;
+  const wakeTarget = wakeFor(todayKey(wakeTs), settings);
+  const onTime = minutesOfDay(wakeTs) <= hmToMinutes(wakeTarget) + 10;
 
   const save = async () => {
     if (quality === null || busy) return;
     setBusy(true);
     await saveNight();
-    const meta = { nightWakings: wakings, wakeTarget: settings.wakeTarget, onTime };
+    const meta = { nightWakings: wakings, wakeTarget, onTime };
     if (rerate && existing) {
       // Pre-boundary wake (e.g. 02:50 before a flight): the day hasn't rolled, but this is a new morning,
       // so file it on the next day rather than overwrite yesterday's keystone.
@@ -82,7 +83,7 @@ export function UpScreen({ t }: { t: Today }) {
       <div class="topbar">
         <div>
           <h1>{rerate ? 'Re-rate' : 'Up'}</h1>
-          <p class="sub">{rerate ? `Up at ${fmtTime(wakeTs)} · time stays as logged` : `${fmtTime(wakeTs)} · target ${settings.wakeTarget} · ${onTime ? 'on time' : 'later than target — still counts'}`}</p>
+          <p class="sub">{rerate ? `Up at ${fmtTime(wakeTs)} · time stays as logged` : `${fmtTime(wakeTs)} · target ${wakeTarget} · ${onTime ? 'on time' : 'later than target — still counts'}`}</p>
         </div>
         <button class="iconbtn" onClick={() => go('today')}>Back</button>
       </div>

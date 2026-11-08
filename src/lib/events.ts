@@ -1,6 +1,8 @@
 import { db, PROFILE_ID, newUid, type Event, type EventType } from './db';
 import { logicalDay } from './day';
 
+function noonOf(key: string): number { const [y, m, d] = key.split('-').map(Number); return new Date(y, m - 1, d, 12, 0, 0, 0).getTime(); }
+
 // The event log is append-only. Nothing is ever deleted or edited: an undo is
 // itself an event (`undo`, meta.undoOf = the uid it cancels), a correction is an
 // event (`amend`, meta.target = the uid it corrects), and activeEvents()/deriveDay()
@@ -8,6 +10,9 @@ import { logicalDay } from './day';
 // permanent uid so the log can be merged across devices.
 
 let boundary = '03:00';
+/** When the user is filling in an earlier day, new taps default to that day (stamped noon, marked backfilled). */
+let viewDay: string | null = null;
+export function setViewDay(d: string | null) { viewDay = d; }
 export function setBoundary(b: string) { boundary = b; }
 export function todayKey(now = Date.now()): string { return logicalDay(now, boundary); }
 
@@ -33,8 +38,10 @@ export async function append(ev: Omit<Event, 'uid' | 'synced' | 'id' | 'profileI
 }
 
 export async function log(type: EventType, opts: LogOpts = {}): Promise<string | null> {
-  const ts = opts.ts ?? Date.now();
-  const day = opts.day ?? logicalDay(ts, boundary);
+  const backfill = !!viewDay && opts.day === undefined && opts.ts === undefined;
+  const ts = opts.ts ?? (backfill ? noonOf(viewDay!) : Date.now());
+  const day = opts.day ?? (backfill ? viewDay! : logicalDay(ts, boundary));
+  if (backfill) opts = { ...opts, meta: { ...(opts.meta ?? {}), backfilled: true } };
 
   if (ONE_PER_DAY.has(type)) {
     const existing = activeEvents(await eventsForDay(day)).find((e) => e.type === type && (opts.key === undefined || e.key === opts.key));

@@ -77,10 +77,14 @@ export function SettingsScreen({ t }: { t: Today }) {
 
       <h2>Sleep hypothesis</h2>
       <div class="card">
-        <div class="field"><label>Wake target</label><input type="time" value={settings.wakeTarget} onChange={(e) => set({ wakeTarget: (e.target as HTMLInputElement).value })} /></div>
-        <div class="field"><label>In bed by</label><input type="time" value={settings.bedtimeHypothesis} onChange={(e) => set({ bedtimeHypothesis: (e.target as HTMLInputElement).value })} /></div>
+        <div class="chiprow">Weeknights · Sun–Thu</div>
+        <div class="field"><label>In bed by</label><input type="time" value={settings.bedtimeHypothesis} onChange={(e) => set({ bedtimeHypothesis: (e.target as HTMLInputElement).value })} aria-label="Weeknight bedtime" /></div>
+        <div class="field"><label>Wake (Mon–Fri)</label><input type="time" value={settings.wakeTarget} onChange={(e) => set({ wakeTarget: (e.target as HTMLInputElement).value })} aria-label="Weekday wake time" /></div>
+        <div class="chiprow">Weekend nights · Fri & Sat</div>
+        <div class="field"><label>In bed by</label><input type="time" value={settings.weekendBedtime} onChange={(e) => set({ weekendBedtime: (e.target as HTMLInputElement).value })} aria-label="Weekend bedtime" /></div>
+        <div class="field"><label>Wake (Sat & Sun)</label><input type="time" value={settings.weekendWake} onChange={(e) => set({ weekendWake: (e.target as HTMLInputElement).value })} aria-label="Weekend wake time" /></div>
         <div class="field"><label>Wind-down lead</label><span class="stepper"><button class="minus" onClick={() => set({ windDownLeadMin: Math.max(15, settings.windDownLeadMin - 15) })}>−</button><span class="count">{settings.windDownLeadMin}m</span><button class="minus" onClick={() => set({ windDownLeadMin: Math.min(120, settings.windDownLeadMin + 15) })}>+</button></span></div>
-        <div class="field"><label class="muted small">Wind-down cue</label><span class="muted small">{windDownAt} — set this as an iOS Shortcuts automation that opens Brew</span></div>
+        <div class="field"><label class="muted small">Wind-down cue</label><span class="muted small">{windDownAt} weeknights · {minusMinutes(settings.weekendBedtime, settings.windDownLeadMin)} Fri & Sat — use these for the iOS Shortcuts automations</span></div>
       </div>
 
       <h2>Day</h2>

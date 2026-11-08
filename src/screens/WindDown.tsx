@@ -1,7 +1,7 @@
 import { useState } from 'preact/hooks';
 import type { Today } from '../lib/store';
 import { log, undoLast } from '../lib/events';
-import { minusMinutes } from '../lib/day';
+import { minusMinutes, bedtimeFor, isWeekendEvening } from '../lib/day';
 import { go } from '../router';
 import { Player } from './Session';
 
@@ -17,7 +17,8 @@ export function WindDownScreen({ t }: { t: Today }) {
   const [showVideo, setShowVideo] = useState(false);
   const kitchen = habits.find((h) => h.key === 'kitchen_closed');
   const bedtime = sessions.find((s) => s.category === 'bedtime');
-  const windDownAt = minusMinutes(settings.bedtimeHypothesis, settings.windDownLeadMin);
+  const bedtimeAt = bedtimeFor(day, settings);
+  const windDownAt = minusMinutes(bedtimeAt, settings.windDownLeadMin);
 
   const setChip = (key: string, v: string) => log('chip', { key, value: v });
   const teeth = !!state.habits['teeth_pm'];
@@ -43,7 +44,7 @@ export function WindDownScreen({ t }: { t: Today }) {
       <div class="topbar">
         <div>
           <h1>Wind-down</h1>
-          <p class="sub">From {windDownAt} · in bed by {settings.bedtimeHypothesis}</p>
+          <p class="sub">From {windDownAt} · in bed by {bedtimeAt}{isWeekendEvening(day) ? ' · weekend' : ''}</p>
         </div>
         <button class="iconbtn" onClick={() => go('today')}>Back</button>
       </div>

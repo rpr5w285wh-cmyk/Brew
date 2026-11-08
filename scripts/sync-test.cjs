@@ -84,6 +84,11 @@ async function handle(route) {
   await phone.p.getByText('Signed in').waitFor();
   await wait(800);
   check('phone taps uploaded', server.events.filter((e) => e.type === 'water').length === 2 && server.events.some((e) => e.type === 'coffee'));
+  await phone.p.getByRole('button', { name: 'Back' }).click();
+  const sl = phone.p.locator('.syncline');
+  await sl.filter({ hasText: /Synced/ }).waitFor({ timeout: 6000 }).catch(() => {});
+  check('header shows synced', /Synced/.test(await sl.textContent()), await sl.textContent());
+  await phone.p.getByRole('button', { name: 'Settings', exact: true }).click();
   check('pending is 0 after sign-in', (await phone.p.locator('.field', { hasText: 'Waiting to upload' }).locator('.muted').textContent()).trim() === '0');
   check('phone plan uploaded', [...server.state.keys()].some((k) => k.includes('|plan:')));
 

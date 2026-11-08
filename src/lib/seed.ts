@@ -47,6 +47,8 @@ export const DEFAULT_SETTINGS: Settings = {
   weighDay: 0,
   theme: 'dark',
   tisaneCountsAsWater: true,
+  weekendBedtime: '23:30',
+  weekendWake: '07:30',
 };
 
 // weekday: 0 = Sunday … 6 = Saturday

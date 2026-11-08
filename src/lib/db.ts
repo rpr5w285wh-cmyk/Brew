@@ -22,6 +22,9 @@ export interface Settings {
   weighDay: number;          // 0 = Sunday
   theme: 'dark' | 'light' | 'system';
   tisaneCountsAsWater: boolean;
+  /** Fri & Sat nights: bedtime that evening, wake the next morning (Sat & Sun). */
+  weekendBedtime: string;
+  weekendWake: string;
 }
 
 export interface Habit {

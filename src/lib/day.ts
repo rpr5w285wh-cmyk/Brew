@@ -83,3 +83,19 @@ export function prettyDay(key: string): string {
   const [y, mo, d] = key.split('-').map(Number);
   return new Date(y, mo - 1, d).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
 }
+
+/** Weekend nights are Friday and Saturday: the bedtime on those evenings and the wake time on the mornings after (Sat, Sun). */
+export function isWeekendEvening(key: string): boolean { const w = weekdayOf(key); return w === 5 || w === 6; }
+export function isWeekendMorning(key: string): boolean { const w = weekdayOf(key); return w === 6 || w === 0; }
+export function bedtimeFor(key: string, s: { bedtimeHypothesis: string; weekendBedtime?: string }): string {
+  return isWeekendEvening(key) && s.weekendBedtime ? s.weekendBedtime : s.bedtimeHypothesis;
+}
+export function wakeFor(key: string, s: { wakeTarget: string; weekendWake?: string }): string {
+  return isWeekendMorning(key) && s.weekendWake ? s.weekendWake : s.wakeTarget;
+}
+
+/** Whole days from a to b (b later → positive). */
+export function daysBetween(a: string, b: string): number {
+  const [y1, m1, d1] = a.split('-').map(Number); const [y2, m2, d2] = b.split('-').map(Number);
+  return Math.round((Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 86_400_000);
+}

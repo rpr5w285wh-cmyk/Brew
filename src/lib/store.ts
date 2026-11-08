@@ -3,6 +3,7 @@ import { liveQuery } from 'dexie';
 import { db, PROFILE_ID, type Settings, type Session, type Habit, type PlanDay, type TemplateRow } from './db';
 import { DEFAULT_SETTINGS, ensureSeeded } from './seed';
 import { prevDay } from './day';
+import { setViewDay } from './events';
 import { eventsForDay, deriveDay, setBoundary, todayKey, type DayState } from './events';
 import { planFor } from './picker';
 import { initSync, pullBeforePlanning, markStateDirty } from './sync';
@@ -24,12 +25,17 @@ export interface Today {
   sessions: Session[];
   template: TemplateRow[];
   refresh: () => void;
+  /** The real today, and whether an earlier day is being filled in. */
+  today: string;
+  viewing: boolean;
+  viewDay: (key: string | null) => void;
 }
 
 export function useToday(): Today {
   const [ready, setReady] = useState(false);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [day, setDay] = useState(todayKey());
+  const [viewing, setViewing] = useState<string | null>(null);
   const [state, setState] = useState<DayState>(deriveDay(day, []));
   const [prev, setPrev] = useState<DayState>(deriveDay(prevDay(day), []));
   const [plan, setPlan] = useState<PlanDay | null>(null);
@@ -50,19 +56,23 @@ export function useToday(): Today {
       await syncStarted;
       let s: Settings = { ...DEFAULT_SETTINGS, ...((await db.settings.get(PROFILE_ID)) ?? {}) };
       setBoundary(s.dayBoundary);
-      const d = todayKey();
+      const d = viewing ?? todayKey();
+      setViewDay(viewing);
       // New day and no plan yet on this device: give another device's plan a moment to arrive.
-      if (!(await db.plan_days.get([PROFILE_ID, d]))) {
+      if (!viewing && !(await db.plan_days.get([PROFILE_ID, d]))) {
         await pullBeforePlanning();
         s = { ...DEFAULT_SETTINGS, ...((await db.settings.get(PROFILE_ID)) ?? {}) };
       }
       const [p, h, all, t] = await Promise.all([
-        planFor(d, s),
+        viewing ? db.plan_days.get([PROFILE_ID, d]).then((x) => x ?? { profileId: PROFILE_ID, date: d, context: 'normal' as const, sessionId: null, swapId: null, tier: s.tier, daySessionId: null }) : planFor(d, s),
         db.habits.where('profileId').equals(PROFILE_ID).sortBy('order'),
         db.sessions.toArray(),
         db.template.where('profileId').equals(PROFILE_ID).toArray(),
       ]);
       if (cancelled) return;
+      const [evD, evP] = await Promise.all([eventsForDay(d), eventsForDay(prevDay(d))]);
+      if (cancelled) return;
+      setState(deriveDay(d, evD)); setPrev(deriveDay(prevDay(d), evP));
       setSettings(s); setDay(d); setPlan(p); setHabits(h); setSessions(all); setTemplate(t);
       setSession(p.sessionId ? all.find((x) => x.id === p.sessionId) ?? null : null);
       setSwap(p.swapId ? all.find((x) => x.id === p.swapId) ?? null : null);
@@ -70,7 +80,7 @@ export function useToday(): Today {
       setReady(true);
     })();
     return () => { cancelled = true; };
-  }, [tick]);
+  }, [tick, viewing]);
 
   // live events for today
   useEffect(() => {
@@ -93,16 +103,16 @@ export function useToday(): Today {
 
   // roll over at the day boundary while the app is open, and whenever the app comes back to the foreground
   useEffect(() => {
-    const check = () => { if (todayKey() !== day) refresh(); };
+    const check = () => { if (!viewing && todayKey() !== day) refresh(); };
     const id = setInterval(check, 60_000);
     const onVis = () => { if (document.visibilityState === 'visible') check(); };
     document.addEventListener('visibilitychange', onVis);
     addEventListener('pageshow', check);
     addEventListener('focus', check);
     return () => { clearInterval(id); document.removeEventListener('visibilitychange', onVis); removeEventListener('pageshow', check); removeEventListener('focus', check); };
-  }, [day, refresh]);
+  }, [day, refresh, viewing]);
 
-  return { ready, day, settings, state, prev, plan, session, swap, daySession, habits, sessions, template, refresh };
+  return { ready, day, settings, state, prev, plan, session, swap, daySession, habits, sessions, template, refresh, today: todayKey(), viewing: day !== todayKey(), viewDay: (k) => setViewing(k && k !== todayKey() ? k : null) };
 }
 
 export async function saveSettings(patch: Partial<Settings>): Promise<void> {

@@ -26,6 +26,7 @@ fs.mkdirSync(out, { recursive: true });
   const checks = [];
   const check = (name, ok, detail) => { checks.push({ name, ok: !!ok, detail }); if (!ok) console.error('FAIL', name, detail ?? ''); };
 
+  await page.clock.install({ time: new Date('2026-11-11T06:40:00-05:00') }); // a Wednesday morning
   await page.goto(base, { waitUntil: 'networkidle' });
   await page.getByRole('heading', { name: 'Morning' }).waitFor();
   await shot('01-today-fresh');
@@ -142,7 +143,7 @@ fs.mkdirSync(out, { recursive: true });
   const planBefore = (await events()).plans[0];
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.waitForURL(/#\/settings/);
-  const notToday = (new Date().getDay() + 3) % 7;
+  const notToday = (3 + 3) % 7; // Wednesday + 3
   const sel = page.locator('.field select').nth(2 + notToday); // theme, weighDay, then Sun..Sat
   await sel.selectOption('energy');
   await page.waitForTimeout(400);
@@ -295,6 +296,47 @@ fs.mkdirSync(out, { recursive: true });
     check('shower skip logged once, not as done', ev4.filter((e) => e.type === 'habit_skip' && e.key === 'shower').length === 1 && !ev4.some((e) => e.type === 'habit_done' && e.key === 'shower'));
     check('moved session logged as the session (slot day)', sd4.length === 1 && sd4[0].meta.slot === 'day' && ev4.some((e) => e.type === 'session_later'));
     await ctx4.close();
+  }
+
+  // Sunday morning: weekend wake target, weigh-in skip, then go back to Saturday and fill in a forgotten tap
+  {
+    const ctx5 = await browser.newContext({ ...devices['iPhone 14'], locale: 'en-CA', timezoneId: 'America/Toronto' });
+    const p5 = await ctx5.newPage();
+    await p5.clock.install({ time: new Date('2026-11-08T07:20:00-05:00') });
+    await p5.goto(base, { waitUntil: 'load' });
+    await p5.getByRole('heading', { name: 'Morning' }).waitFor();
+    check('Sunday wake target is the weekend one', await p5.getByText('Target 07:30 · weekend').isVisible());
+    await p5.getByRole('button', { name: 'Skip the weigh-in this week' }).click();
+    await p5.getByText('Skipped this week').waitFor();
+    check('weigh-in skip works', true);
+    check('Next moves past the weigh-in', (await p5.locator('.next-title').textContent()).trim() !== 'Weigh in');
+    // Go back to Saturday: weekend bedtime shown for Saturday evening, and fill in a forgotten coffee
+    await p5.getByRole('button', { name: 'Previous day' }).click();
+    await p5.getByText('Filling in').waitFor();
+    { const bt = await p5.locator('.past-banner').textContent(); check('past day banner', /Filling in Saturday/.test(bt), bt); }
+    check('no Next banner on a past day', (await p5.locator('.next').count()) === 0);
+    check('Saturday evening uses weekend bedtime', await p5.getByText(/in bed by 23:30 · weekend|Lights out|Not logged · fix last night/).first().isVisible());
+    const coffeeRow = p5.locator('.counter', { has: p5.locator('.label', { hasText: /^Coffee$/ }) });
+    await coffeeRow.locator('.pill').click();
+    await p5.waitForTimeout(400);
+    check('Next day arrow enabled when viewing the past', await p5.getByRole('button', { name: 'Next day' }).isEnabled());
+    await p5.screenshot({ path: `${out}/10-past-day.png`, fullPage: true });
+    await p5.getByRole('button', { name: 'Today', exact: true }).click();
+    await p5.locator('.daynav .sub', { hasText: /^Today · / }).waitFor();
+    { const cc = (await p5.locator('.counter', { has: p5.locator('.label', { hasText: /^Coffee$/ }) }).locator('.count').textContent()).trim(); check('back to today', cc === '0', cc + ' | ' + await p5.locator('.daynav .sub').textContent()); }
+    const ev5 = await p5.evaluate(async () => {
+      const req = indexedDB.open('brew'); const dbx = await new Promise((r) => { req.onsuccess = () => r(req.result); });
+      return new Promise((r) => { const q = dbx.transaction('events').objectStore('events').getAll(); q.onsuccess = () => r(q.result); });
+    });
+    const c5 = ev5.find((e) => e.type === 'coffee');
+    check('forgotten coffee filed on Saturday, marked backfilled', c5 && c5.day === '2026-11-07' && c5.meta?.backfilled === true && new Date(c5.ts).getHours() === 12, JSON.stringify(c5));
+    check('weigh skip logged', ev5.some((e) => e.type === 'habit_skip' && e.key === 'weigh'));
+    // Friday evening wind-down shows the weekend bedtime
+    await p5.clock.setSystemTime(new Date('2026-11-13T21:00:00-05:00'));
+    await p5.reload({ waitUntil: 'load' });
+    await p5.getByRole('heading', { name: 'Morning' }).waitFor();
+    check('Friday evening weekend bedtime', await p5.getByText('From 22:45 · in bed by 23:30 · weekend').isVisible());
+    await ctx5.close();
   }
 
   console.log(JSON.stringify({ counts, plan: d.plans[0], checks, errors }, null, 2));

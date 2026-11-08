@@ -2,10 +2,11 @@ import { useRef, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import type { Today } from '../lib/store';
 import { log, undoLast } from '../lib/events';
-import { fmtTime, minusMinutes, prettyDay, weekdayOf, minutesOfDay, hmToMinutes } from '../lib/day';
+import { fmtTime, minusMinutes, prettyDay, weekdayOf, minutesOfDay, hmToMinutes, bedtimeFor, wakeFor, isWeekendEvening, isWeekendMorning, prevDay, nextDay, daysBetween } from '../lib/day';
 import { go } from '../router';
 import { isInstalled } from '../lib/store';
 import { useSyncStatus } from './SyncCard';
+import { syncNow } from '../lib/sync';
 
 interface StepProps {
   done: boolean;
@@ -36,7 +37,8 @@ function Step({ done, active, title, hint, onTap, onUndo, undoLabel, children }:
 }
 
 export function TodayScreen({ t }: { t: Today }) {
-  const { day, state, prev, settings, session, habits, sessions, daySession } = t;
+  const { day, state, prev, settings, session, habits, sessions, daySession, viewing } = t;
+  const nav = { day, today: t.today, viewing, go: t.viewDay };
   const off = state.context === 'off';
   const [toast, setToast] = useState<string | null>(null);
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 1400); };
@@ -60,7 +62,9 @@ export function TodayScreen({ t }: { t: Today }) {
   const isWeighDay = weekdayOf(day) === settings.weighDay && !off;
   const [weight, setWeight] = useState('');
   const kitchen = habits.find((x) => x.key === 'kitchen_closed');
-  const windDownAt = minusMinutes(settings.bedtimeHypothesis, settings.windDownLeadMin);
+  const bedtime = bedtimeFor(day, settings);
+  const wakeTarget = wakeFor(day, settings);
+  const windDownAt = minusMinutes(bedtime, settings.windDownLeadMin);
   const nowMin = minutesOfDay(Date.now());
   const isEvening = nowMin >= hmToMinutes(windDownAt) || nowMin < 3 * 60;
 
@@ -85,21 +89,26 @@ export function TodayScreen({ t }: { t: Today }) {
     {
       key: 'up', label: 'Up', done: !!state.up, go: () => go('up'),
       el: (active) => <Step done={!!state.up} active={active} title="Up"
-        hint={state.up ? `Up at ${fmtTime(state.up.ts)} · slept ${state.up.value}/5 · tap to re-rate` : `Target ${settings.wakeTarget}`}
-        onTap={() => go('up')} />,
+        hint={state.up ? `Up at ${fmtTime(state.up.ts)} · slept ${state.up.value}/5${viewing ? '' : ' · tap to re-rate'}` : viewing ? 'Not logged' : `Target ${wakeTarget}${isWeekendMorning(day) ? ' · weekend' : ''}`}
+        onTap={viewing ? undefined : () => go('up')} />,
     },
     ...(isWeighDay ? [{
-      key: 'weigh', label: 'Weigh in', done: state.weigh !== undefined, go: () => document.getElementById('weigh-input')?.focus(),
+      key: 'weigh', label: 'Weigh in', done: state.weigh !== undefined || !!state.skipped['weigh'], go: () => document.getElementById('weigh-input')?.focus(),
       el: (active: boolean) => (
+        state.skipped['weigh'] && state.weigh === undefined ? (
+          <Step done active={false} title="Weigh-in" hint="Skipped this week" onUndo={() => once(() => undoLast(day, 'habit_skip', 'weigh'))} undoLabel="Undo skipping the weigh-in" />
+        ) : (
         <Step done={state.weigh !== undefined} active={active} title={state.weigh !== undefined ? `Weigh-in: ${state.weigh} kg` : 'Weigh-in'}
           hint={state.weigh !== undefined ? undefined : 'Before coffee. Skip if no scale.'} onUndo={() => once(() => undoLast(day, 'weigh'))} undoLabel="Undo weigh-in">
           {state.weigh === undefined && (
             <span class="inline-form">
               <input id="weigh-input" type="number" inputMode="decimal" step="0.1" placeholder="kg" value={weight} onInput={(e) => setWeight((e.target as HTMLInputElement).value)} />
               <button class="pill" disabled={!weight} onClick={() => once(async () => { await log('weigh', { value: Number(weight) }); setWeight(''); })}>Log</button>
+              <button class="undo later" onClick={() => once(() => log('habit_skip', { key: 'weigh' }))} aria-label="Skip the weigh-in this week">skip</button>
             </span>
           )}
         </Step>
+        )
       ),
     } as Item] : []),
     {
@@ -108,7 +117,7 @@ export function TodayScreen({ t }: { t: Today }) {
         <Step done={!!state.breather} active={active} title="Breather"
           hint={state.breather ? (state.breather.key === 'skipped' ? 'Skipped today' : `Done (${state.breather.key === 'zazen' ? 'Zazen' : 'Adriene'})`) : 'Two minutes to get out of bed'}
           onUndo={() => once(() => undoLast(day, 'breather'))}>
-          {!state.breather && active && (
+          {!state.breather && (active || viewing) && (
             <span class="inline-actions" id="breather-row">
               <a class="pill ghost" href={settings.breathingUrl} target="_blank" rel="noopener" onClick={() => log('breather', { key: 'zazen' })}>Zazen</a>
               <button class="pill ghost" onClick={() => once(async () => { await log('breather', { key: 'adriene' }); go('session', { breath: '1' }); })}>Adriene 5 min</button>
@@ -130,7 +139,7 @@ export function TodayScreen({ t }: { t: Today }) {
       ) : (
         <Step done={!!state.sessionDone} active={active} title={sessionTitle} hint={sessionHint}
           onTap={state.sessionDone ? undefined : () => go('session')} onUndo={() => once(() => undoLast(day, 'session_done'))} undoLabel="Undo session">
-          {!state.sessionDone && <button class="undo later" onClick={() => once(() => log('session_later'))} aria-label="Do the session later today">Later</button>}
+          {!state.sessionDone && !viewing && <button class="undo later" onClick={() => once(() => log('session_later'))} aria-label="Do the session later today">Later</button>}
         </Step>
       ),
     },
@@ -151,7 +160,7 @@ export function TodayScreen({ t }: { t: Today }) {
 
   // What's next: the first open morning step; after the wind-down time, the wind-down itself.
   let next: Item | null = null;
-  if (!state.lightsOut) {
+  if (!state.lightsOut && !viewing) {
     if (isEvening) next = windItem;
     else next = morning.find((m) => !m.done) ?? (!outsideItem.done ? outsideItem : null) ?? (movedLater ? breakItem : null) ?? windItem;
   }
@@ -159,7 +168,7 @@ export function TodayScreen({ t }: { t: Today }) {
 
   // Night view: tonight's lights out, or last night still open after the 03:00 rollover (got up and not back yet).
   const nightOpenPrev = !state.lightsOut && !state.up && !!prev.lightsOut && prev.awake.some((a) => a.back === undefined);
-  const night = state.lightsOut ? state : nightOpenPrev ? prev : null;
+  const night = viewing ? null : state.lightsOut ? state : nightOpenPrev ? prev : null;
   const awakeNow = night ? night.awake.find((a) => a.back === undefined) : undefined;
 
   if (night) {
@@ -167,7 +176,7 @@ export function TodayScreen({ t }: { t: Today }) {
     const ateLate = night.chips['ate_late'] === 'yes';
     return (
       <main class="screen">
-        <Header day={day} off={off} toggleOff={toggleOff} />
+        <Header nav={nav} off={off} toggleOff={toggleOff} />
         {awakeNow ? (
           <div class="card goodnight">
             <div class="muted">Up since {fmtTime(awakeNow.up)} · lights out was {fmtTime(night.inBedTs!)}</div>
@@ -198,7 +207,14 @@ export function TodayScreen({ t }: { t: Today }) {
 
   return (
     <main class="screen">
-      <Header day={day} off={off} toggleOff={toggleOff} />
+      <Header nav={nav} off={off} toggleOff={toggleOff} />
+
+      {viewing && (
+        <div class="past-banner">
+          <span>Filling in <strong>{prettyDay(day)}</strong>. Taps are added to that day.</span>
+          <button class="pill ghost" onClick={() => t.viewDay(null)}>Today</button>
+        </div>
+      )}
 
       {next && (
         <button class="next" onClick={next.go}>
@@ -242,7 +258,11 @@ export function TodayScreen({ t }: { t: Today }) {
         {kitchen?.active && (
           <Step done={h('kitchen_closed')} active={false} title="Kitchen closed" hint="No eating after 20:00" onTap={h('kitchen_closed') ? undefined : () => doHabit('kitchen_closed')} onUndo={() => undoHabit('kitchen_closed')} />
         )}
-        <Step done={false} active={activeKey === 'wind'} title="Wind-down" hint={`From ${windDownAt} · in bed by ${settings.bedtimeHypothesis}`} onTap={() => go('winddown')} />
+        {viewing ? (
+          <Step done={!!state.lightsOut} active={false} title="Wind-down" hint={state.lightsOut ? `Lights out ${fmtTime(state.inBedTs ?? state.lightsOut.ts)}` : 'Not logged · fix last night from the Up screen'} />
+        ) : (
+          <Step done={false} active={activeKey === 'wind'} title="Wind-down" hint={`From ${windDownAt} · in bed by ${bedtime}${isWeekendEvening(day) ? ' · weekend' : ''}`} onTap={() => go('winddown')} />
+        )}
       </div>
 
       <p class="note muted">One screen, one answer. Taps are timestamped; nothing leaves the phone.</p>
@@ -251,8 +271,24 @@ export function TodayScreen({ t }: { t: Today }) {
   );
 }
 
-function Header({ day, off, toggleOff }: { day: string; off: boolean; toggleOff: () => void }) {
+type Nav = { day: string; today: string; viewing: boolean; go: (k: string | null) => void };
+const MAX_BACK = 14;
+
+function syncLine(s: ReturnType<typeof useSyncStatus>): { text: string; warn: boolean } | null {
+  if (!s.signedIn) return null;
+  if (s.syncing) return { text: 'Syncing…', warn: false };
+  if (s.error) return { text: s.error.startsWith('Offline') ? `Offline · ${s.pending} waiting` : 'Sync problem · tap to retry', warn: true };
+  if (s.pending > 0) return { text: `${s.pending} waiting to sync`, warn: false };
+  if (!s.lastSync) return { text: 'Not synced yet · tap to sync', warn: false };
+  const mins = Math.round((Date.now() - s.lastSync) / 60000);
+  return { text: `Synced ${mins < 1 ? 'just now' : mins < 60 ? `${mins} min ago` : `at ${fmtTime(s.lastSync)}`}`, warn: false };
+}
+
+function Header({ nav, off, toggleOff }: { nav: Nav; off: boolean; toggleOff: () => void }) {
   const sync = useSyncStatus();
+  const line = syncLine(sync);
+  const back = prevDay(nav.day);
+  const canBack = daysBetween(back, nav.today) <= MAX_BACK;
   return (
     <>
     {!sync.signedIn && (
@@ -264,7 +300,12 @@ function Header({ day, off, toggleOff }: { day: string; off: boolean; toggleOff:
     <div class="topbar">
       <div>
         <h1>Brew</h1>
-        <p class="sub">{prettyDay(day)}{off ? ' · off-routine' : ''}</p>
+        <div class="daynav">
+          <button class="navbtn" onClick={() => nav.go(back)} disabled={!canBack} aria-label="Previous day">‹</button>
+          <span class="sub">{nav.viewing ? prettyDay(nav.day) : `Today · ${prettyDay(nav.day)}`}{off ? ' · off-routine' : ''}</span>
+          <button class="navbtn" onClick={() => nav.go(nextDay(nav.day))} disabled={!nav.viewing} aria-label="Next day">›</button>
+        </div>
+        {line && <button class={`syncline ${line.warn ? 'warn' : ''}`} onClick={() => syncNow()}>{line.text}</button>}
       </div>
       <div style="display:flex;gap:6px">
         <button class={`iconbtn ${off ? 'on' : ''}`} onClick={toggleOff} aria-pressed={off}>{off ? 'Back to routine' : 'Off day?'}</button>
