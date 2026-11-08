@@ -1,7 +1,7 @@
 import { useRef, useState } from 'preact/hooks';
 import type { Today } from '../lib/store';
 import { log, amend, todayKey, activeEvents, eventsForDay, undoEvent } from '../lib/events';
-import { fmtTime, minutesOfDay, hmToMinutes, nextDay, nightTs, wakeFor } from '../lib/day';
+import { fmtTime, minutesOfDay, hmToMinutes, nextDay, nightTs, wakeFor, morningTs, prettyDay } from '../lib/day';
 import { go } from '../router';
 
 const LABELS = ['Rough', 'Meh', 'OK', 'Good', 'Great'];
@@ -15,9 +15,14 @@ export function UpScreen({ t }: { t: Today }) {
   const [quality, setQuality] = useState<number | null>(typeof existing?.value === 'number' ? existing.value : null);
   const [wakings, setWakings] = useState<number>((existing?.meta?.nightWakings as number) ?? 0);
   const [busy, setBusy] = useState(false);
+  // Which morning this is: the day being filled in, or today.
+  const morning = t.viewing ? day : todayKey(openedAt.current);
+  // Wake time defaults to when the screen opened (or what's logged); editable if he forgot to tap straight away.
+  const loggedWake = state.wakeTs ?? existing?.ts;
+  const [wakeAt, setWakeAt] = useState(fmtTime(loggedWake ?? (t.viewing ? morningTs(day, wakeFor(day, settings)) : openedAt.current)));
 
   // Last night, editable. The night is yesterday's logical day unless it's still before the boundary.
-  const night = state.lightsOut && !state.up ? state : prev;
+  const night = !t.viewing && state.lightsOut && !state.up ? state : prev;
   const lo = night.lightsOut;
   const hm = (ts?: number) => (ts ? fmtTime(ts) : '');
   const [inBed, setInBed] = useState(hm(night.inBedTs));
@@ -55,8 +60,8 @@ export function UpScreen({ t }: { t: Today }) {
     }
   };
 
-  const wakeTs = existing?.ts ?? openedAt.current;
-  const wakeTarget = wakeFor(todayKey(wakeTs), settings);
+  const wakeTs = wakeAt ? morningTs(morning, wakeAt) : (loggedWake ?? openedAt.current);
+  const wakeTarget = wakeFor(morning, settings);
   const onTime = minutesOfDay(wakeTs) <= hmToMinutes(wakeTarget) + 10;
 
   const save = async () => {
@@ -64,16 +69,20 @@ export function UpScreen({ t }: { t: Today }) {
     setBusy(true);
     await saveNight();
     const meta = { nightWakings: wakings, wakeTarget, onTime };
+    const entered = wakeAt !== fmtTime(openedAt.current);
     if (rerate && existing) {
       // Pre-boundary wake (e.g. 02:50 before a flight): the day hasn't rolled, but this is a new morning,
       // so file it on the next day rather than overwrite yesterday's keystone.
-      const earlyNewMorning = !!state.lightsOut && existing.ts < state.lightsOut.ts && minutesOfDay(openedAt.current) < 3 * 60;
+      const earlyNewMorning = !t.viewing && !!state.lightsOut && existing.ts < state.lightsOut.ts && minutesOfDay(openedAt.current) < 3 * 60;
       if (earlyNewMorning) await log('up', { ts: openedAt.current, day: nextDay(day), value: quality, meta: { ...meta, earlyWake: true } });
-      else await amend(existing, { value: quality, meta });
+      else {
+        const timeChanged = !!loggedWake && wakeAt !== fmtTime(loggedWake);
+        await amend(existing, { value: quality, meta: timeChanged ? { ...meta, correctedTs: wakeTs } : meta });
+      }
     } else {
-      const nowDay = todayKey(openedAt.current);
-      await log('up', { ts: openedAt.current, day: nowDay, value: quality, meta });
-      if (nowDay !== day) t.refresh();
+      // The event's time is the wake time itself (entered, or when the screen opened).
+      await log('up', { ts: wakeTs, day: morning, value: quality, meta: { ...meta, ...(entered || t.viewing ? { entered: true, loggedAt: Date.now() } : {}) } });
+      if (morning !== day) t.refresh();
     }
     go('today');
   };
@@ -83,10 +92,15 @@ export function UpScreen({ t }: { t: Today }) {
       <div class="topbar">
         <div>
           <h1>{rerate ? 'Re-rate' : 'Up'}</h1>
-          <p class="sub">{rerate ? `Up at ${fmtTime(wakeTs)} · time stays as logged` : `${fmtTime(wakeTs)} · target ${wakeTarget} · ${onTime ? 'on time' : 'later than target — still counts'}`}</p>
+          <p class="sub">{t.viewing ? `${prettyDay(day)} · ` : ''}target {wakeTarget} · {onTime ? 'on time' : 'later than target — still counts'}</p>
         </div>
         <button class="iconbtn" onClick={() => go('today')}>Back</button>
       </div>
+
+      <div class="card">
+        <div class="field"><label for="wake-at">Woke up at</label><input id="wake-at" type="time" value={wakeAt} onChange={(e) => setWakeAt((e.target as HTMLInputElement).value)} /></div>
+      </div>
+      <p class="note muted">{t.viewing ? 'Set when you got up that morning.' : 'Already set to now. Change it if you got up earlier and are logging late.'}</p>
 
       <h2>How was the sleep?</h2>
       <div class="scale">

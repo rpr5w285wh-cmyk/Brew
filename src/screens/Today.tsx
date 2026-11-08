@@ -89,8 +89,8 @@ export function TodayScreen({ t }: { t: Today }) {
     {
       key: 'up', label: 'Up', done: !!state.up, go: () => go('up'),
       el: (active) => <Step done={!!state.up} active={active} title="Up"
-        hint={state.up ? `Up at ${fmtTime(state.up.ts)} · slept ${state.up.value}/5${viewing ? '' : ' · tap to re-rate'}` : viewing ? 'Not logged' : `Target ${wakeTarget}${isWeekendMorning(day) ? ' · weekend' : ''}`}
-        onTap={viewing ? undefined : () => go('up')} />,
+        hint={state.up ? `Up at ${fmtTime(state.wakeTs ?? state.up.ts)} · slept ${state.up.value}/5 · tap to change` : viewing ? 'Not logged · tap to add' : `Target ${wakeTarget}${isWeekendMorning(day) ? ' · weekend' : ''}`}
+        onTap={() => go('up')} />,
     },
     ...(isWeighDay ? [{
       key: 'weigh', label: 'Weigh in', done: state.weigh !== undefined || !!state.skipped['weigh'], go: () => document.getElementById('weigh-input')?.focus(),
@@ -259,7 +259,7 @@ export function TodayScreen({ t }: { t: Today }) {
           <Step done={h('kitchen_closed')} active={false} title="Kitchen closed" hint="No eating after 20:00" onTap={h('kitchen_closed') ? undefined : () => doHabit('kitchen_closed')} onUndo={() => undoHabit('kitchen_closed')} />
         )}
         {viewing ? (
-          <Step done={!!state.lightsOut} active={false} title="Wind-down" hint={state.lightsOut ? `Lights out ${fmtTime(state.inBedTs ?? state.lightsOut.ts)}` : 'Not logged · fix last night from the Up screen'} />
+          <Step done={!!state.lightsOut} active={false} title="Wind-down" hint={state.lightsOut ? `Lights out ${fmtTime(state.inBedTs ?? state.lightsOut.ts)}` : 'Not logged · tap to add'} onTap={state.lightsOut ? undefined : () => go('winddown')} />
         ) : (
           <Step done={false} active={activeKey === 'wind'} title="Wind-down" hint={`From ${windDownAt} · in bed by ${bedtime}${isWeekendEvening(day) ? ' · weekend' : ''}`} onTap={() => go('winddown')} />
         )}

@@ -232,7 +232,7 @@ fs.mkdirSync(out, { recursive: true });
     await p3.getByRole('heading', { name: 'Morning' }).waitFor();
     await p3.locator('.row', { hasText: 'Up' }).first().locator('.rowmain').click();
     await p3.getByRole('heading', { name: 'Last night' }).waitFor();
-    const vals = await p3.locator('input[type=time]').evaluateAll((els) => els.map((e) => e.value));
+    const vals = await p3.locator('input[type=time]:not(#wake-at)').evaluateAll((els) => els.map((e) => e.value));
     check('last night pre-filled', JSON.stringify(vals) === JSON.stringify(['22:40', '01:10', '02:40']), JSON.stringify(vals));
     check('ate-late carried from the night', await p3.locator('.chips[aria-label="Ate after 20:00"] .chip.on').textContent() === 'Yes');
     // correct: actually lights out at 23:05, back to bed 03:15
@@ -315,7 +315,7 @@ fs.mkdirSync(out, { recursive: true });
     await p5.getByText('Filling in').waitFor();
     { const bt = await p5.locator('.past-banner').textContent(); check('past day banner', /Filling in Saturday/.test(bt), bt); }
     check('no Next banner on a past day', (await p5.locator('.next').count()) === 0);
-    check('Saturday evening uses weekend bedtime', await p5.getByText(/in bed by 23:30 · weekend|Lights out|Not logged · fix last night/).first().isVisible());
+    check('Saturday evening uses weekend bedtime', await p5.getByText(/in bed by 23:30 · weekend|Lights out|Not logged · tap to add/).first().isVisible());
     const coffeeRow = p5.locator('.counter', { has: p5.locator('.label', { hasText: /^Coffee$/ }) });
     await coffeeRow.locator('.pill').click();
     await p5.waitForTimeout(400);
@@ -337,6 +337,65 @@ fs.mkdirSync(out, { recursive: true });
     await p5.getByRole('heading', { name: 'Morning' }).waitFor();
     check('Friday evening weekend bedtime', await p5.getByText('From 22:45 · in bed by 23:30 · weekend').isVisible());
     await ctx5.close();
+  }
+
+  // Forgot to tap: enter the real wake and lights-out times; and add a missed Up on a past day
+  {
+    const ctx6 = await browser.newContext({ ...devices['iPhone 14'], locale: 'en-CA', timezoneId: 'America/Toronto' });
+    const p6 = await ctx6.newPage();
+    const t = (iso) => new Date(iso).getTime();
+    const all = () => p6.evaluate(async () => {
+      const req = indexedDB.open('brew'); const dbx = await new Promise((r) => { req.onsuccess = () => r(req.result); });
+      return new Promise((r) => { const q = dbx.transaction('events').objectStore('events').getAll(); q.onsuccess = () => r(q.result); });
+    });
+    await p6.clock.install({ time: new Date('2026-11-11T07:10:00-05:00') }); // Wednesday, logging late
+    await p6.goto(base, { waitUntil: 'load' });
+    await p6.getByRole('heading', { name: 'Morning' }).waitFor();
+    // Past day first: Tuesday's Up was never logged
+    await p6.getByRole('button', { name: 'Previous day' }).click();
+    await p6.locator('.past-banner').waitFor();
+    await p6.locator('.row', { hasText: 'Up' }).first().locator('.rowmain').click();
+    await p6.locator('#wake-at').waitFor();
+    check('past-day Up defaults to that morning\'s target', (await p6.locator('#wake-at').inputValue()) === '06:30');
+    await p6.locator('#wake-at').fill('06:50');
+    await p6.getByRole('button', { name: 'OK' }).click();
+    await p6.getByRole('button', { name: "I'm up" }).click();
+    await p6.getByText(/Up at 06:50/).waitFor();
+    let ev = await all();
+    let up = ev.find((e) => e.type === 'up');
+    check('past-day Up filed on that morning', up.day === '2026-11-10' && up.ts === t('2026-11-10T06:50:00-05:00') && up.meta.entered === true, JSON.stringify(up));
+    await p6.getByRole('button', { name: 'Today', exact: true }).click();
+    await p6.locator('.daynav .sub', { hasText: /^Today · / }).waitFor();
+    // Today: actually up at 06:35, logging at 07:10
+    await p6.locator('.row', { hasText: 'Up' }).first().locator('.rowmain').click();
+    check('wake time defaults to now', (await p6.locator('#wake-at').inputValue()) === '07:10');
+    await p6.locator('#wake-at').fill('06:35');
+    check('on time after entering the real wake time', await p6.getByText(/on time/).isVisible());
+    await p6.getByRole('button', { name: 'Good' }).click();
+    await p6.getByRole('button', { name: "I'm up" }).click();
+    await p6.getByText(/Up at 06:35/).waitFor();
+    ev = await all();
+    up = ev.find((e) => e.type === 'up' && e.day === '2026-11-11');
+    check('entered wake time is the event time', up.ts === t('2026-11-11T06:35:00-05:00') && up.meta.onTime === true, JSON.stringify(up));
+    // Change it again later via re-rate: amend, original kept
+    await p6.locator('.row', { hasText: 'Up' }).first().locator('.rowmain').click();
+    await p6.locator('#wake-at').fill('06:40');
+    await p6.getByRole('button', { name: 'Save' }).click();
+    await p6.getByText(/Up at 06:40/).waitFor();
+    ev = await all();
+    check('changing wake time later is an amend', ev.some((e) => e.type === 'amend' && e.meta.patch?.correctedTs === t('2026-11-11T06:40:00-05:00')));
+    // Evening: in bed at 22:50, logging at 23:20
+    await p6.clock.setSystemTime(new Date('2026-11-11T23:20:00-05:00'));
+    await p6.locator('.row', { hasText: 'Wind-down' }).locator('.rowmain').click();
+    check('lights-out defaults to now', (await p6.locator('#out-at').inputValue()) === '23:20');
+    await p6.locator('#out-at').fill('22:50');
+    await p6.getByRole('button', { name: 'Lights out' }).click();
+    await p6.getByText('Good night.').waitFor();
+    check('night card shows entered time', await p6.getByText('Lights out at 22:50').isVisible());
+    ev = await all();
+    const lo = ev.find((e) => e.type === 'lights_out');
+    check('entered lights-out is the event time', lo.day === '2026-11-11' && lo.ts === t('2026-11-11T22:50:00-05:00') && lo.meta.entered === true, JSON.stringify(lo));
+    await ctx6.close();
   }
 
   console.log(JSON.stringify({ counts, plan: d.plans[0], checks, errors }, null, 2));

@@ -99,3 +99,10 @@ export function daysBetween(a: string, b: string): number {
   const [y1, m1, d1] = a.split('-').map(Number); const [y2, m2, d2] = b.split('-').map(Number);
   return Math.round((Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 86_400_000);
 }
+
+/** Timestamp for "HH:MM" on the calendar date of logical day `key` (a morning time). */
+export function morningTs(key: string, hm: string): number {
+  const [y, mo, d] = key.split('-').map(Number);
+  const { h, m } = parseHM(hm);
+  return new Date(y, mo - 1, d, h, m, 0, 0).getTime();
+}

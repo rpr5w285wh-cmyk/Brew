@@ -127,6 +127,8 @@ export interface DayState {
   context: 'normal' | 'off';
   up?: Event;
   lightsOut?: Event;
+  /** Wake time as entered or corrected (meta.correctedTs), else the logged time. */
+  wakeTs?: number;
   /** Lights-out time as corrected the next morning (meta.correctedTs), else the tap time. */
   inBedTs?: number;
   /** Times up in the night after lights out, each with when he got back to bed (undefined = still up). */
@@ -157,7 +159,7 @@ export function deriveDay(day: string, evs: Event[]): DayState {
   for (const e of [...activeEvents(evs)].sort((a, b) => a.ts - b.ts)) {
     switch (e.type) {
       case 'context': s.context = e.value === 'off' ? 'off' : 'normal'; break;
-      case 'up': s.up = e; break;
+      case 'up': s.up = e; s.wakeTs = typeof e.meta?.correctedTs === 'number' ? (e.meta.correctedTs as number) : e.ts; break;
       case 'lights_out': s.lightsOut = e; s.inBedTs = typeof e.meta?.correctedTs === 'number' ? (e.meta.correctedTs as number) : e.ts; break;
       case 'night_up': s.awake.push({ up: e.ts }); break;
       case 'back_to_bed': { const open = [...s.awake].reverse().find((a) => a.back === undefined); if (open) open.back = e.ts; else s.awake.push({ up: e.ts, back: e.ts }); break; }
