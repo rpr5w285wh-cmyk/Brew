@@ -121,7 +121,7 @@ export function TodayScreen({ t }: { t: Today }) {
           onUndo={() => once(() => undoLast(day, 'breather'))}>
           {!state.breather && (active || viewing) && (
             <span class="inline-actions" id="breather-row">
-              <a class="pill ghost" href={settings.breathingUrl} target="_blank" rel="noopener" onClick={() => log('breather', { key: 'zazen' })}>Zazen</a>
+              <a class="pill ghost" href={settings.breathingUrl} target="_blank" rel="noopener" onClick={() => once(() => log('breather', { key: 'zazen' }))}>Zazen</a>
               <button class="pill ghost" onClick={() => once(async () => { await log('breather', { key: 'adriene' }); go('session', { breath: '1' }); })}>Adriene 5 min</button>
               <button class="undo" onClick={() => once(() => log('breather', { key: 'skipped' }))} aria-label="Skip the breather today">skip</button>
             </span>
