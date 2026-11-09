@@ -3,49 +3,11 @@
 const { chromium, devices } = require('playwright');
 const base = process.argv[2] || 'http://localhost:4173/';
 const SUPA = 'https://dhetwzklyujcaiehdijo.supabase.co';
-const USER = { id: '11111111-1111-4111-8111-111111111111', email: 'mdf@example.com', password: 'correct horse' };
+const { USER } = require('./fake-supabase.cjs');
 
 // ---- fake server ----
-const server = { events: [], state: new Map(), clock: Date.now() };
-const nowIso = () => new Date(++server.clock).toISOString();
-const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*', 'access-control-expose-headers': '*' };
-const json = (route, status, body) => route.fulfill({ status, headers: { ...cors, 'content-type': 'application/json' }, body: body === undefined ? '' : JSON.stringify(body) });
-const userOf = (req) => ((req.headers()['authorization'] || '') === 'Bearer tok-' + USER.id ? USER : null);
-const gt = (u, col) => { const v = u.searchParams.get(col); return v && v.startsWith('gt.') ? v.slice(3) : null; };
-const authUser = { id: USER.id, aud: 'authenticated', role: 'authenticated', email: USER.email, app_metadata: { provider: 'email' }, user_metadata: {}, created_at: new Date().toISOString() };
-
-async function handle(route) {
-  const req = route.request(); const u = new URL(req.url()); const m = req.method();
-  if (m === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
-  if (u.pathname === '/auth/v1/token') {
-    const b = JSON.parse(req.postData() || '{}');
-    if (b.email !== USER.email || b.password !== USER.password) return json(route, 400, { code: 'invalid_credentials', error_code: 'invalid_credentials', msg: 'Invalid login credentials' });
-    const exp = Math.floor(Date.now() / 1000) + 3600;
-    return json(route, 200, { access_token: 'tok-' + USER.id, token_type: 'bearer', expires_in: 3600, expires_at: exp, refresh_token: 'refresh', user: authUser });
-  }
-  if (u.pathname === '/auth/v1/user') return userOf(req) ? json(route, 200, authUser) : json(route, 401, { msg: 'no' });
-  if (u.pathname === '/auth/v1/logout') return route.fulfill({ status: 204, headers: cors });
-  const who = userOf(req);
-  if (!who) return json(route, 401, { message: 'JWT required' });
-  if (u.pathname === '/rest/v1/events' && m === 'POST') {
-    for (const r of JSON.parse(req.postData())) if (!server.events.some((e) => e.id === r.id)) server.events.push({ ...r, user_id: who.id, created_at: nowIso() });
-    return json(route, 201);
-  }
-  if (u.pathname === '/rest/v1/events' && m === 'GET') {
-    const since = gt(u, 'created_at') || '';
-    return json(route, 200, server.events.filter((e) => e.user_id === who.id && e.created_at > since).sort((a, b) => a.created_at.localeCompare(b.created_at)).slice(0, Number(u.searchParams.get('limit') || 1000)));
-  }
-  if (u.pathname === '/rest/v1/state' && m === 'POST') {
-    for (const r of JSON.parse(req.postData())) server.state.set(who.id + '|' + r.kind, { ...r, user_id: who.id });
-    return json(route, 201);
-  }
-  if (u.pathname === '/rest/v1/state' && m === 'GET') {
-    const since = gt(u, 'updated_at') || '';
-    return json(route, 200, [...server.state.values()].filter((r) => r.user_id === who.id && r.updated_at > since).sort((a, b) => a.updated_at.localeCompare(b.updated_at)).map(({ kind, body, updated_at }) => ({ kind, body, updated_at })));
-  }
-  return json(route, 404, { message: 'not faked: ' + m + ' ' + u.pathname });
-}
-
+const { makeServer } = require('./fake-supabase.cjs');
+const { server, handle } = makeServer();
 (async () => {
   const browser = await chromium.launch();
   const checks = [];
@@ -73,7 +35,7 @@ async function handle(route) {
 
   // Phone: taps before signing in
   const phone = await device('phone');
-  check('banner when not signed in', await phone.p.getByText('Not syncing yet.').or(phone.p.getByText("You're in a browser")).first().isVisible());
+  check('banner when not signed in', await phone.p.locator('.browser-warn').getByText(/Sign in to sync/).isVisible());
   await plus(phone.p, 'Water').click(); await wait(500); await plus(phone.p, 'Water').click(); await wait(500); await plus(phone.p, 'Coffee').click();
   const phoneSession = await sessionTitle(phone.p);
   await signIn(phone.p, 'wrong');
@@ -91,6 +53,7 @@ async function handle(route) {
   await phone.p.getByRole('button', { name: 'Settings', exact: true }).click();
   check('pending is 0 after sign-in', (await phone.p.locator('.field', { hasText: 'Waiting to upload' }).locator('.muted').textContent()).trim() === '0');
   check('phone plan uploaded', [...server.state.keys()].some((k) => k.includes('|plan:')));
+  check('theme never synced', ![...server.state.keys()].some((k) => k.includes('theme')));
 
   // Laptop: its own copy with a tisane, then signs in → merge both ways, cloud plan wins
   const laptop = await device('laptop');

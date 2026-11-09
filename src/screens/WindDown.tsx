@@ -1,6 +1,6 @@
 import { useState } from 'preact/hooks';
 import type { Today } from '../lib/store';
-import { log, undoLast } from '../lib/events';
+import { log, undoLast, amend } from '../lib/events';
 import { minusMinutes, bedtimeFor, isWeekendEvening, fmtTime, nightTs } from '../lib/day';
 import { go } from '../router';
 import { Player } from './Session';
@@ -35,11 +35,20 @@ export function WindDownScreen({ t }: { t: Today }) {
 
   // Lights-out time defaults to now; editable if he got into bed earlier and is logging late.
   const [openedAt] = useState(() => Date.now());
-  const [outAt, setOutAt] = useState(() => fmtTime(t.viewing ? nightTs(day, bedtimeFor(day, settings)) : openedAt));
+  const already = state.lightsOut;
+  const [outAt, setOutAt] = useState(() => fmtTime(already ? (state.inBedTs ?? already.ts) : t.viewing ? nightTs(day, bedtimeFor(day, settings)) : openedAt));
   const lightsOut = async () => {
     if (busy) return; setBusy(true);
+    if (already) {
+      // Already logged (e.g. filling in a past day): correct the time instead of silently ignoring it. (C20)
+      if (outAt !== fmtTime(state.inBedTs ?? already.ts)) await amend(already, { meta: { correctedTs: nightTs(day, outAt) } });
+      go('today');
+      return;
+    }
     const entered = t.viewing || outAt !== fmtTime(openedAt);
-    await log('lights_out', entered ? { day, ts: nightTs(day, outAt), meta: { entered: true, loggedAt: Date.now() } } : { day });
+    // Snapshot which bedtime target applied tonight, so the sleep experiment keeps its history. (C14)
+    const meta = { bedtimeTarget: bedtimeAt, ...(entered ? { entered: true, loggedAt: Date.now() } : {}) };
+    await log('lights_out', entered ? { day, ts: nightTs(day, outAt), meta } : { day, meta });
     go('today');
   };
 
@@ -108,9 +117,9 @@ export function WindDownScreen({ t }: { t: Today }) {
       </div>
 
       <div class="card" style="margin-top:12px">
-        <div class="field"><label for="out-at">Lights out at</label><input id="out-at" type="time" value={outAt} onChange={(e) => setOutAt((e.target as HTMLInputElement).value)} /></div>
+        <div class="field"><label for="out-at">Lights out at</label><input id="out-at" class="edit" type="time" value={outAt} onChange={(e) => setOutAt((e.target as HTMLInputElement).value)} /></div>
       </div>
-      <button class="btn soft" onClick={lightsOut} disabled={busy}>Lights out</button>
+      <button class="btn soft" onClick={lightsOut} disabled={busy}>{already ? 'Save lights-out time' : 'Lights out'}</button>
       <p class="note muted">Chips are optional tonight; they feed the sleep experiment. Lights out records the in-bed time. Phone away after this.</p>
     </main>
   );

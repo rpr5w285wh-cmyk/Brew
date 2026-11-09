@@ -3,7 +3,7 @@ import type { Today } from '../lib/store';
 import { saveSettings, isInstalled } from '../lib/store';
 import { db, PROFILE_ID, type Category, type Tier, type Settings } from '../lib/db';
 import { CATEGORY_LABEL } from '../lib/seed';
-import { log } from '../lib/events';
+import { log, todayKey } from '../lib/events';
 import { exportJSON, exportEventsCSV, importJSON, shareOrDownload, markExported } from '../lib/exportData';
 import { replan } from '../lib/picker';
 import { markStateDirty } from '../lib/sync';
@@ -24,20 +24,26 @@ export function SettingsScreen({ t }: { t: Today }) {
 
   const set = async (patch: Parameters<typeof saveSettings>[0]) => { await saveSettings(patch); t.refresh(); };
 
+  // Settings always act on the real today, never on a past day being filled in (C8).
+  useEffect(() => { if (t.viewing) t.viewDay(null); }, []);
+  const today = todayKey();
+  const now = () => ({ ts: Date.now(), day: todayKey() });
+
   // Re-plan today only if the change affects today and the session isn't already done.
   const maybeReplanToday = async (affectsToday: boolean) => {
-    if (affectsToday && !t.state.sessionDone) await replan(t.day);
+    const done = t.day === today ? !!t.state.sessionDone : false;
+    if (affectsToday && !done) await replan(today);
   };
 
   const setTemplate = async (weekday: number, category: Category) => {
     await db.template.put({ profileId: PROFILE_ID, weekday, category });
     markStateDirty('template');
-    await maybeReplanToday(weekday === weekdayOf(t.day));
+    await maybeReplanToday(weekday === weekdayOf(today));
     t.refresh();
   };
 
   const setTier = async (tier: Tier) => {
-    await log('tier_change', { value: tier, meta: { from: settings.tier } });
+    await log('tier_change', { ...now(), value: tier, meta: { from: settings.tier } });
     await maybeReplanToday(true);
     await set({ tier });
     flash(`Tier ${tier}`);
@@ -48,8 +54,8 @@ export function SettingsScreen({ t }: { t: Today }) {
     t.refresh();
   };
 
-  const doExport = async () => { if (await shareOrDownload(`brew-${t.day}.json`, await exportJSON(), 'application/json')) { await markExported('json'); flash('Exported'); } };
-  const doCSV = async () => { if (await shareOrDownload(`brew-events-${t.day}.csv`, await exportEventsCSV(), 'text/csv')) { await markExported('csv'); flash('Exported'); } };
+  const doExport = async () => { if (await shareOrDownload(`brew-${today}.json`, await exportJSON(), 'application/json')) { await markExported('json'); flash('Exported'); } };
+  const doCSV = async () => { if (await shareOrDownload(`brew-events-${today}.csv`, await exportEventsCSV(), 'text/csv')) { await markExported('csv'); flash('Exported'); } };
   const doImport = async (e: Event) => {
     const input = e.target as HTMLInputElement;
     const f = input.files?.[0];
@@ -132,7 +138,7 @@ export function SettingsScreen({ t }: { t: Today }) {
         <div class="field"><label>Export events (CSV)</label><button class="pill ghost" onClick={doCSV}>Export</button></div>
         <div class="field"><label>Restore from backup</label><input type="file" accept="application/json,.json" onChange={doImport} style="max-width:170px" /></div>
       </div>
-      <p class="note muted">The home-screen app and the browser keep separate data on iPhone; to move data, Export here and Restore in the other. Everything lives on this phone. Export at the weekly review; a lost phone means lost logs otherwise.</p>
+      <p class="note muted">The home-screen app and the browser keep separate data on iPhone; to move data, Export here and Restore in the other. Without sync, everything lives only on this phone, so export at the weekly review.</p>
 
       <h2>Library</h2>
       <div class="card library">

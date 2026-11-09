@@ -1,12 +1,12 @@
-import { useEffect, useState, useCallback } from 'preact/hooks';
+import { useEffect, useState, useCallback, useRef } from 'preact/hooks';
 import { liveQuery } from 'dexie';
 import { db, PROFILE_ID, type Settings, type Session, type Habit, type PlanDay, type TemplateRow } from './db';
 import { DEFAULT_SETTINGS, ensureSeeded } from './seed';
-import { prevDay } from './day';
-import { setViewDay } from './events';
+import { prevDay, nextDay } from './day';
+import { setViewDay, setEarlyWake, beforeBoundary, activeEvents, log } from './events';
 import { eventsForDay, deriveDay, setBoundary, todayKey, type DayState } from './events';
 import { planFor } from './picker';
-import { initSync, pullBeforePlanning, markStateDirty } from './sync';
+import { initSync, pullBeforePlanning, markSettingsDirty } from './sync';
 
 let syncStarted: Promise<void> | null = null;
 
@@ -36,6 +36,8 @@ export function useToday(): Today {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [day, setDay] = useState(todayKey());
   const [viewing, setViewing] = useState<string | null>(null);
+  const lastToday = useRef(todayKey());
+  useEffect(() => { lastToday.current = todayKey(); }, [viewing]);
   const [state, setState] = useState<DayState>(deriveDay(day, []));
   const [prev, setPrev] = useState<DayState>(deriveDay(prevDay(day), []));
   const [plan, setPlan] = useState<PlanDay | null>(null);
@@ -56,6 +58,12 @@ export function useToday(): Today {
       await syncStarted;
       let s: Settings = { ...DEFAULT_SETTINGS, ...((await db.settings.get(PROFILE_ID)) ?? {}) };
       setBoundary(s.dayBoundary);
+      // Already up early (before the boundary)? Then the app is on the new day.
+      {
+        const logical = todayKey(Date.now());
+        const ev = beforeBoundary() ? activeEvents(await eventsForDay(nextDay(logical))).find((e) => e.type === 'up') : undefined;
+        setEarlyWake(ev ? nextDay(logical) : null);
+      }
       const d = viewing ?? todayKey();
       setViewDay(viewing);
       // New day and no plan yet on this device: give another device's plan a moment to arrive.
@@ -101,11 +109,23 @@ export function useToday(): Today {
     return () => removeEventListener('brew-synced', on);
   }, [refresh]);
 
-  // roll over at the day boundary while the app is open, and whenever the app comes back to the foreground
+  // Roll over at the day boundary; re-render every minute so time-based hints ("Next") stay current (C25).
+  // A past-day view never survives a day change or a long trip to the background (C3).
+  const [, setClock] = useState(0);
+  const hiddenAt = useRef<number | null>(null);
   useEffect(() => {
-    const check = () => { if (!viewing && todayKey() !== day) refresh(); };
+    const check = () => {
+      setClock(Date.now());
+      const stale = hiddenAt.current !== null && Date.now() - hiddenAt.current > 5 * 60_000;
+      if (viewing && (stale || todayKey() !== lastToday.current)) { setViewing(null); hiddenAt.current = null; return; }
+      if (!viewing && todayKey() !== day) refresh();
+    };
     const id = setInterval(check, 60_000);
-    const onVis = () => { if (document.visibilityState === 'visible') check(); };
+    const onVis = () => {
+      if (document.visibilityState === 'hidden') { hiddenAt.current = Date.now(); return; }
+      check();
+      hiddenAt.current = null;
+    };
     document.addEventListener('visibilitychange', onVis);
     addEventListener('pageshow', check);
     addEventListener('focus', check);
@@ -115,10 +135,17 @@ export function useToday(): Today {
   return { ready, day, settings, state, prev, plan, session, swap, daySession, habits, sessions, template, refresh, today: todayKey(), viewing: day !== todayKey(), viewDay: (k) => setViewing(k && k !== todayKey() ? k : null) };
 }
 
+// Sleep-hypothesis fields get a settings_change event, so the experiment keeps a history of targets. (C14)
+const LOGGED_SETTINGS = ['wakeTarget', 'bedtimeHypothesis', 'weekendBedtime', 'weekendWake', 'windDownLeadMin', 'dayBoundary'];
+
 export async function saveSettings(patch: Partial<Settings>): Promise<void> {
-  const cur = (await db.settings.get(PROFILE_ID)) ?? DEFAULT_SETTINGS;
+  const cur = { ...DEFAULT_SETTINGS, ...((await db.settings.get(PROFILE_ID)) ?? {}) };
   await db.settings.put({ ...cur, ...patch });
-  markStateDirty('settings');
+  const changed = (Object.keys(patch) as (keyof Settings)[]).filter((k) => JSON.stringify(cur[k]) !== JSON.stringify(patch[k]));
+  markSettingsDirty(changed as string[]);
+  for (const k of changed) {
+    if (LOGGED_SETTINGS.includes(k)) await log('settings_change', { key: k, value: patch[k] as string | number, meta: { from: cur[k] }, ts: Date.now(), day: todayKey() });
+  }
 }
 
 export async function requestPersistence(): Promise<boolean> {

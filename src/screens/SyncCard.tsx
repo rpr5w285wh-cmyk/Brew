@@ -56,6 +56,7 @@ export function SyncCard() {
         <div class="field"><label>Sign out</label><button class="pill ghost" onClick={() => { if (confirm('Sign out? Taps stay on this phone; they just stop syncing.')) signOut(); }}>Sign out</button></div>
       </div>
       {s.error && <p class="note" style="color:var(--warn)">{s.error}</p>}
+      {s.needsDbUpdate && <p class="note muted">Sync works. One database update (the put_state SQL) is still to run in Supabase; until then a settings change made on two devices at once could keep the older one.</p>}
     </>
   );
 }

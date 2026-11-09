@@ -15,7 +15,7 @@ export async function planFor(day: string, settings: Settings): Promise<PlanDay>
     if (existing.daySessionId === undefined) {
       const withDay = { ...existing, daySessionId: await pickDaySession(day, settings, [existing.sessionId, existing.swapId]) };
       await db.plan_days.put(withDay);
-      markStateDirty(`plan:${day}`);
+      markStateDirty(`plan:${day}`, { weak: true });
       return withDay;
     }
     return existing;
@@ -48,7 +48,7 @@ export async function planFor(day: string, settings: Settings): Promise<PlanDay>
     daySessionId: await pickDaySession(day, settings, [pool[0]?.id ?? null, pool[1]?.id ?? null]),
   };
   await db.plan_days.put(plan);
-  markStateDirty(`plan:${day}`);
+  markStateDirty(`plan:${day}`, { weak: true });
   return plan;
 }
 

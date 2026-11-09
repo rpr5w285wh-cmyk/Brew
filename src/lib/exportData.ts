@@ -1,5 +1,6 @@
 import { db, PROFILE_ID, newUid, type Event } from './db';
-import { log } from './events';
+import { log, todayKey } from './events';
+import { resetCursors, syncNow } from './sync';
 
 export async function exportJSON(): Promise<string> {
   const dump = {
@@ -18,7 +19,7 @@ export async function exportJSON(): Promise<string> {
 }
 
 /** Record that an export actually left the phone. */
-export async function markExported(kind: 'json' | 'csv'): Promise<void> { await log('export', { key: kind }); }
+export async function markExported(kind: 'json' | 'csv'): Promise<void> { await log('export', { key: kind, ts: Date.now(), day: todayKey() }); }
 
 export async function exportEventsCSV(): Promise<string> {
   const evs = await db.events.where('profileId').equals(PROFILE_ID).sortBy('ts');
@@ -53,6 +54,9 @@ export async function importJSON(text: string): Promise<{ events: number }> {
       await db.events.bulkAdd(evs.map(({ id: _id, ...rest }) => ({ ...rest, synced: 0 as const })));
     }
   });
+  // Re-read everything from the cloud next sync, so cloud-only events aren't lost behind the cursor. (C13)
+  resetCursors();
+  void syncNow();
   return { events: dump.events?.length ?? 0 };
 }
 

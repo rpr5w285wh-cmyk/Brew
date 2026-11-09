@@ -1,7 +1,7 @@
 import { useRef, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import type { Today } from '../lib/store';
-import { log, undoLast } from '../lib/events';
+import { log, undoLast, todayKey, beforeBoundary } from '../lib/events';
 import { fmtTime, minusMinutes, prettyDay, weekdayOf, minutesOfDay, hmToMinutes, bedtimeFor, wakeFor, isWeekendEvening, isWeekendMorning, prevDay, nextDay, daysBetween } from '../lib/day';
 import { go } from '../router';
 import { isInstalled } from '../lib/store';
@@ -66,7 +66,9 @@ export function TodayScreen({ t }: { t: Today }) {
   const wakeTarget = wakeFor(day, settings);
   const windDownAt = minusMinutes(bedtime, settings.windDownLeadMin);
   const nowMin = minutesOfDay(Date.now());
-  const isEvening = nowMin >= hmToMinutes(windDownAt) || nowMin < 3 * 60;
+  // Evening = from the wind-down time until the boundary, while the app is still on that evening's day. (C26)
+  const stillThatEvening = todayKey(Date.now()) === day && beforeBoundary();
+  const isEvening = nowMin >= hmToMinutes(windDownAt) || stillThatEvening;
 
   const doneSession = state.sessionDone
     ? (state.sessionDone.key === 'fallback' ? null : sessions.find((s) => s.id === state.sessionDone!.key) ?? null)
@@ -89,7 +91,7 @@ export function TodayScreen({ t }: { t: Today }) {
     {
       key: 'up', label: 'Up', done: !!state.up, go: () => go('up'),
       el: (active) => <Step done={!!state.up} active={active} title="Up"
-        hint={state.up ? `Up at ${fmtTime(state.wakeTs ?? state.up.ts)} · slept ${state.up.value}/5 · tap to change` : viewing ? 'Not logged · tap to add' : `Target ${wakeTarget}${isWeekendMorning(day) ? ' · weekend' : ''}`}
+        hint={stillThatEvening && !viewing ? 'Up early? Tap to start the new day' : state.up ? `Up at ${fmtTime(state.wakeTs ?? state.up.ts)} · slept ${state.up.value}/5 · tap to change` : viewing ? 'No wake time · tap to add one' : `Target ${wakeTarget}${isWeekendMorning(day) ? ' · weekend' : ''}`}
         onTap={() => go('up')} />,
     },
     ...(isWeighDay ? [{
@@ -167,8 +169,13 @@ export function TodayScreen({ t }: { t: Today }) {
   const activeKey = next?.key ?? null;
 
   // Night view: tonight's lights out, or last night still open after the 03:00 rollover (got up and not back yet).
-  const nightOpenPrev = !state.lightsOut && !state.up && !!prev.lightsOut && prev.awake.some((a) => a.back === undefined);
-  const night = viewing ? null : state.lightsOut ? state : nightOpenPrev ? prev : null;
+  // Night card: from lights-out until Up is logged, or until an hour before the wake target —
+  // whichever comes first. It never traps: "Up for the day" is always on it. (C2, C10)
+  const morningCutoff = Math.min(hmToMinutes(wakeTarget) - 60, 12 * 60);
+  const nightAfterBoundary = !state.lightsOut && !state.up && !!prev.lightsOut && nowMin < morningCutoff;
+  const night = viewing ? null : state.lightsOut ? state : nightAfterBoundary ? prev : null;
+  // "Up for the day" only makes sense once it's past midnight (before that it's just "undo lights out").
+  const canGetUp = !!night && (night === prev || beforeBoundary());
   const awakeNow = night ? night.awake.find((a) => a.back === undefined) : undefined;
 
   if (night) {
@@ -186,12 +193,14 @@ export function TodayScreen({ t }: { t: Today }) {
               <button class={`chip ${ateLate ? 'on' : ''}`} aria-pressed={ateLate} onClick={() => once(() => log('chip', { key: 'ate_late', value: ateLate ? 'no' : 'yes', day: nd }))}>Ate something</button>
             </div>
             <button class="btn soft" onClick={() => once(() => log('back_to_bed', { day: nd }))}>Back to bed</button>
+            {canGetUp && <button class="btn quiet" onClick={() => go('up')}>Up for the day</button>}
           </div>
         ) : (
           <div class="card goodnight">
             <div class="muted">Lights out at {fmtTime(night.inBedTs!)}{night.awake.length ? ` · up ${night.awake.length}× since` : ''}</div>
             <div class="big">Good night.</div>
-            <div class="muted">Tap Up in the morning.</div>
+            <div class="muted">{canGetUp ? 'Awake for good? Tap Up for the day.' : 'Tap Up in the morning.'}</div>
+            {canGetUp && <button class="btn soft" onClick={() => go('up')}>Up for the day</button>}
             <button class="btn quiet" onClick={() => once(() => log('night_up', { day: nd }))}>Can't sleep — got up</button>
             {!night.awake.length && <button class="undo" style="margin-top:8px" onClick={() => once(() => undoLast(nd, 'lights_out'))}>Not yet — undo lights out</button>}
           </div>
@@ -247,8 +256,8 @@ export function TodayScreen({ t }: { t: Today }) {
             ? (breakDone.key === 'fallback' ? `Fallback at ${fmtTime(breakDone.ts)} — counts` : `${sessions.find((x) => x.id === breakDone.key)?.title ?? 'Done'} · ${fmtTime(breakDone.ts)}`) + (caughtUp && !state.daySession ? " · counted as today's session" : '')
             : movedLater
               ? "Today's session" + (off || !session ? ' · written fallback, 2 min' : ` · ${session.title} · ${session.titleMinutes} min`)
-              : (state.sessionDone ? 'Optional' : "Optional · counts as today's session if the morning one didn't happen")
-                + (off || !daySession ? ' · written fallback, 2 min' : ` · ${daySession.title} · ${daySession.titleMinutes} min`)}
+              : (state.sessionDone ? 'Optional' : "Optional · counts if the morning session didn't happen")
+                + (off || !daySession ? ' · 2-min fallback' : ` · ${daySession.titleMinutes} min`)}
           onTap={breakDone ? undefined : () => go('session', { slot: 'day' })}
           onUndo={() => once(() => (state.daySession ? undoLast(day, 'day_session') : undoLast(day, 'session_done')))} undoLabel="Undo yoga break" />
       </div>
@@ -259,13 +268,13 @@ export function TodayScreen({ t }: { t: Today }) {
           <Step done={h('kitchen_closed')} active={false} title="Kitchen closed" hint="No eating after 20:00" onTap={h('kitchen_closed') ? undefined : () => doHabit('kitchen_closed')} onUndo={() => undoHabit('kitchen_closed')} />
         )}
         {viewing ? (
-          <Step done={!!state.lightsOut} active={false} title="Wind-down" hint={state.lightsOut ? `Lights out ${fmtTime(state.inBedTs ?? state.lightsOut.ts)}` : 'Not logged · tap to add'} onTap={state.lightsOut ? undefined : () => go('winddown')} />
+          <Step done={!!state.lightsOut} active={false} title="Wind-down" hint={state.lightsOut ? `Lights out ${fmtTime(state.inBedTs ?? state.lightsOut.ts)} · tap to change` : 'No lights-out time · tap to add one'} onTap={() => go('winddown')} />
         ) : (
           <Step done={false} active={activeKey === 'wind'} title="Wind-down" hint={`From ${windDownAt} · in bed by ${bedtime}${isWeekendEvening(day) ? ' · weekend' : ''}`} onTap={() => go('winddown')} />
         )}
       </div>
 
-      <p class="note muted">One screen, one answer. Taps are timestamped; nothing leaves the phone.</p>
+      <p class="note muted">One screen, one answer. Taps are timestamped and saved on this phone first.</p>
       {toast && <div class="toast">{toast}</div>}
     </main>
   );
@@ -273,12 +282,19 @@ export function TodayScreen({ t }: { t: Today }) {
 
 type Nav = { day: string; today: string; viewing: boolean; go: (k: string | null) => void };
 const MAX_BACK = 14;
+const BANNER_KEY = 'brew-signin-banner-hidden-until';
+const shortDay = (key: string) => { const [y, m, d] = key.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }); };
 
 function syncLine(s: ReturnType<typeof useSyncStatus>): { text: string; warn: boolean } | null {
   if (!s.signedIn) return null;
   if (s.syncing) return { text: 'Syncing…', warn: false };
-  if (s.error) return { text: s.error.startsWith('Offline') ? `Offline · ${s.pending} waiting` : 'Sync problem · tap to retry', warn: true };
-  if (s.pending > 0) return { text: `${s.pending} waiting to sync`, warn: false };
+  if (s.error) {
+    if (s.error.startsWith('Offline')) return { text: `Offline · ${s.pending} waiting · safe on this phone`, warn: false };
+    if (s.error.startsWith("Can't reach")) return { text: "Can't reach sync · taps are safe here · tap to retry", warn: true };
+    if (s.error.startsWith('Signed out')) return { text: 'Sign in again to sync', warn: true };
+    return { text: 'Sync paused · tap to retry', warn: true };
+  }
+  if (s.pending > 0 && s.pendingSince && Date.now() - s.pendingSince > 60_000) return { text: `${s.pending} waiting to sync · tap to retry`, warn: false };
   if (!s.lastSync) return { text: 'Not synced yet · tap to sync', warn: false };
   const mins = Math.round((Date.now() - s.lastSync) / 60000);
   return { text: `Synced ${mins < 1 ? 'just now' : mins < 60 ? `${mins} min ago` : `at ${fmtTime(s.lastSync)}`}`, warn: false };
@@ -287,22 +303,24 @@ function syncLine(s: ReturnType<typeof useSyncStatus>): { text: string; warn: bo
 function Header({ nav, off, toggleOff }: { nav: Nav; off: boolean; toggleOff: () => void }) {
   const sync = useSyncStatus();
   const line = syncLine(sync);
+  const [bannerHidden, setBannerHidden] = useState(() => { try { return Date.now() < Number(localStorage.getItem(BANNER_KEY) || 0); } catch { return false; } });
+  const hideBanner = () => { try { localStorage.setItem(BANNER_KEY, String(Date.now() + 7 * 86400000)); } catch { /* private mode */ } setBannerHidden(true); };
   const back = prevDay(nav.day);
   const canBack = daysBetween(back, nav.today) <= MAX_BACK;
   return (
     <>
-    {!sync.signedIn && (
-      <button class="browser-warn" onClick={() => go('settings')}>
-        <strong>{isInstalled() ? 'Not syncing yet.' : "You're in a browser, not the Brew app."}</strong>
-        {isInstalled() ? 'Taps are saved on this phone only. Sign in under Settings → Sync to share them across devices.' : 'Taps here stay in this browser. Sign in under Settings → Sync to merge them with your other devices.'}
-      </button>
+    {!sync.signedIn && !bannerHidden && (
+      <div class="browser-warn">
+        <button class="bw-main" onClick={() => go('settings')}>{isInstalled() ? 'Saved on this phone only · Sign in to sync' : 'In a browser, not the app · Sign in to sync'}</button>
+        <button class="bw-x" onClick={hideBanner} aria-label="Hide for a week">✕</button>
+      </div>
     )}
     <div class="topbar">
       <div>
         <h1>Brew</h1>
         <div class="daynav">
           <button class="navbtn" onClick={() => nav.go(back)} disabled={!canBack} aria-label="Previous day">‹</button>
-          <span class="sub">{nav.viewing ? prettyDay(nav.day) : `Today · ${prettyDay(nav.day)}`}{off ? ' · off-routine' : ''}</span>
+          <span class="sub">{nav.viewing ? prettyDay(nav.day) : `Today · ${shortDay(nav.day)}`}{off ? ' · off-routine' : ''}</span>
           <button class="navbtn" onClick={() => nav.go(nextDay(nav.day))} disabled={!nav.viewing} aria-label="Next day">›</button>
         </div>
         {line && <button class={`syncline ${line.warn ? 'warn' : ''}`} onClick={() => syncNow()}>{line.text}</button>}

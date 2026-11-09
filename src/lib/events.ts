@@ -1,5 +1,5 @@
 import { db, PROFILE_ID, newUid, type Event, type EventType } from './db';
-import { logicalDay } from './day';
+import { logicalDay, nextDay, hmToMinutes, minutesOfDay } from './day';
 
 function noonOf(key: string): number { const [y, m, d] = key.split('-').map(Number); return new Date(y, m - 1, d, 12, 0, 0, 0).getTime(); }
 
@@ -14,7 +14,21 @@ let boundary = '03:00';
 let viewDay: string | null = null;
 export function setViewDay(d: string | null) { viewDay = d; }
 export function setBoundary(b: string) { boundary = b; }
-export function todayKey(now = Date.now()): string { return logicalDay(now, boundary); }
+/**
+ * todayKey(ts): the logical day of a timestamp (03:00 boundary).
+ * todayKey(): the day the app is on now — which is the NEXT day if he already logged an early Up
+ * before the boundary (e.g. 02:45 for a flight). (C9)
+ */
+let earlyWake: string | null = null;
+export function setEarlyWake(d: string | null) { earlyWake = d; }
+export function todayKey(now?: number): string {
+  const k = logicalDay(now ?? Date.now(), boundary);
+  if (now === undefined && earlyWake && earlyWake === nextDay(k)) return earlyWake;
+  return k;
+}
+/** True between midnight and the day boundary (still "last night" by the calendar of the app). */
+export function beforeBoundary(now = Date.now()): boolean { return minutesOfDay(now) < hmToMinutes(boundary); }
+export function getBoundary(): string { return boundary; }
 
 /** Types that can only happen once per logical day (per key). A second tap is ignored. */
 const ONE_PER_DAY = new Set<EventType>(['up', 'lights_out', 'session_done', 'session_later', 'day_session', 'breather', 'habit_done', 'habit_skip', 'weigh']);
@@ -37,7 +51,15 @@ export async function append(ev: Omit<Event, 'uid' | 'synced' | 'id' | 'profileI
   return uid;
 }
 
-export async function log(type: EventType, opts: LogOpts = {}): Promise<string | null> {
+// Writes are serialized: the one-per-day check and the add happen with no other log() in between (C27).
+let chain: Promise<unknown> = Promise.resolve();
+export function log(type: EventType, opts: LogOpts = {}): Promise<string | null> {
+  const run = chain.then(() => logNow(type, opts));
+  chain = run.catch(() => undefined);
+  return run;
+}
+
+async function logNow(type: EventType, opts: LogOpts): Promise<string | null> {
   const backfill = !!viewDay && opts.day === undefined && opts.ts === undefined;
   const ts = opts.ts ?? (backfill ? noonOf(viewDay!) : Date.now());
   const day = opts.day ?? (backfill ? viewDay! : logicalDay(ts, boundary));
@@ -48,9 +70,11 @@ export async function log(type: EventType, opts: LogOpts = {}): Promise<string |
     if (existing) return existing.uid ?? null;
   }
   if (DRINKS.has(type)) {
-    const prev = lastCounter.get(type) ?? 0;
-    if (ts - prev < BOUNCE_MS) return null;
-    lastCounter.set(type, ts);
+    // Bounce on the wall clock, per day — never on the event's timestamp (backfilled taps all share noon). (C1)
+    const k = `${type}|${day}`;
+    const now = Date.now();
+    if (now - (lastCounter.get(k) ?? 0) < BOUNCE_MS) return null;
+    lastCounter.set(k, now);
   }
   if (type === 'context' || type === 'chip') {
     // last-wins facts: skip if the current value is already this value
@@ -132,7 +156,7 @@ export interface DayState {
   /** Lights-out time as corrected the next morning (meta.correctedTs), else the tap time. */
   inBedTs?: number;
   /** Times up in the night after lights out, each with when he got back to bed (undefined = still up). */
-  awake: { up: number; back?: number }[];
+  awake: { up: number; back?: number; upEv?: Event; backEv?: Event }[];
   sessionDone?: Event;
   daySession?: Event;
   /** Morning session moved to the day on purpose (not missed). */
@@ -154,28 +178,48 @@ export interface DayState {
   weigh?: number;
 }
 
+/** The time an event stands for: a corrected time if one was amended in, else when it was logged. */
+export function effTs(e: Event): number {
+  return typeof e.meta?.correctedTs === 'number' ? (e.meta.correctedTs as number) : e.ts;
+}
+
+/**
+ * The single interpreter of a day's log. Rules Phase 2/3 rely on:
+ * - Once-a-day facts (up, lights_out, session_done, day_session, session_later, breather, weigh):
+ *   the FIRST live event wins. A duplicate from another device is ignored, never summed. (C12)
+ * - Times are effective times (correctedTs if amended).
+ * - Backfilled drinks count, but never set "last caffeine" — their noon stamp isn't a real time. (C15)
+ * - Wakings pair night_up with the next back_to_bed; an unpaired night_up is "back time unknown".
+ */
 export function deriveDay(day: string, evs: Event[]): DayState {
   const s: DayState = { day, context: 'normal', awake: [], swaps: 0, skipped: {}, water: 0, coffee: 0, tea: 0, tisane: 0, habits: {}, chips: {} };
-  for (const e of [...activeEvents(evs)].sort((a, b) => a.ts - b.ts)) {
+  const first = <K extends 'up' | 'lightsOut' | 'sessionDone' | 'daySession' | 'sessionLater' | 'breather'>(k: K, e: Event) => { if (!s[k]) (s as unknown as Record<string, Event>)[k] = e; };
+  for (const e of [...activeEvents(evs)].sort((a, b) => effTs(a) - effTs(b))) {
+    const t = effTs(e);
+    const real = !e.meta?.backfilled;
     switch (e.type) {
       case 'context': s.context = e.value === 'off' ? 'off' : 'normal'; break;
-      case 'up': s.up = e; s.wakeTs = typeof e.meta?.correctedTs === 'number' ? (e.meta.correctedTs as number) : e.ts; break;
-      case 'lights_out': s.lightsOut = e; s.inBedTs = typeof e.meta?.correctedTs === 'number' ? (e.meta.correctedTs as number) : e.ts; break;
-      case 'night_up': s.awake.push({ up: e.ts }); break;
-      case 'back_to_bed': { const open = [...s.awake].reverse().find((a) => a.back === undefined); if (open) open.back = e.ts; else s.awake.push({ up: e.ts, back: e.ts }); break; }
-      case 'session_done': s.sessionDone = e; break;
-      case 'day_session': s.daySession = e; break;
-      case 'session_later': s.sessionLater = e; break;
-      case 'breather': s.breather = e; break;
+      case 'up': if (!s.up) { s.up = e; s.wakeTs = t; } break;
+      case 'lights_out': if (!s.lightsOut) { s.lightsOut = e; s.inBedTs = t; } break;
+      case 'night_up': s.awake.push({ up: t, upEv: e }); break;
+      case 'back_to_bed': {
+        const open = [...s.awake].reverse().find((a) => a.back === undefined);
+        if (open) { open.back = t; open.backEv = e; } else s.awake.push({ up: t, back: t, backEv: e });
+        break;
+      }
+      case 'session_done': first('sessionDone', e); break;
+      case 'day_session': first('daySession', e); break;
+      case 'session_later': first('sessionLater', e); break;
+      case 'breather': first('breather', e); break;
       case 'swap': s.swaps++; break;
       case 'water': s.water++; break;
-      case 'coffee': s.coffee++; s.lastCoffee = e.ts; s.lastCaffeine = e.ts; break;
-      case 'tea': s.tea++; s.lastTea = e.ts; s.lastCaffeine = e.ts; break;
+      case 'coffee': s.coffee++; if (real) { s.lastCoffee = t; s.lastCaffeine = Math.max(s.lastCaffeine ?? 0, t); } break;
+      case 'tea': s.tea++; if (real) { s.lastTea = t; s.lastCaffeine = Math.max(s.lastCaffeine ?? 0, t); } break;
       case 'tisane': s.tisane++; break;
       case 'habit_done': if (e.key) s.habits[e.key] = true; break;
       case 'habit_skip': if (e.key) s.skipped[e.key] = true; break;
       case 'chip': if (e.key) s.chips[e.key] = e.value ?? ''; break;
-      case 'weigh': if (typeof e.value === 'number') s.weigh = e.value; break;
+      case 'weigh': if (typeof e.value === 'number' && s.weigh === undefined) s.weigh = e.value; break;
     }
   }
   return s;
