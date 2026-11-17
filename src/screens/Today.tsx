@@ -239,12 +239,6 @@ export function TodayScreen({ t }: { t: Today }) {
         </div>
       )}
 
-      {next && (
-        <div class="next-wrap"><button class="next" onClick={() => jumpTo(next!.key)} aria-label={`Next: ${next.label}. Show it in the list`}>
-          <span class="next-label">Next</span>
-          <span class="next-title">{next.label}</span>
-        </button></div>
-      )}
 
       <h2>Morning</h2>
       <div class="card">
@@ -260,6 +254,13 @@ export function TodayScreen({ t }: { t: Today }) {
         {state.lastCaffeine && <div class="counter-note">Last caffeine {fmtTime(state.lastCaffeine)}</div>}
       </div>
 
+      <div class="bottom-dock">
+      {next && (
+        <button class="next" onClick={() => jumpTo(next!.key)} aria-label={`Next: ${next.label}. Show it in the list`}>
+          <span class="next-label">Next</span>
+          <span class="next-title">{next.label}</span>
+        </button>
+      )}
       <nav class="drink-dock" aria-label="Add a drink">
         {([['water', 'Water', state.water], ['coffee', 'Coffee', state.coffee], ['tea', 'Tea', state.tea], ['tisane', 'Tisane', state.tisane]] as const).map(([k, label, n]) => (
           <button key={k} class="dock-btn" onClick={() => { log(k); flash(`${label} +1`); }} aria-label={`Add one ${label.toLowerCase()}, ${n} so far`}>
@@ -267,6 +268,7 @@ export function TodayScreen({ t }: { t: Today }) {
           </button>
         ))}
       </nav>
+      </div>
 
       <h2>Day</h2>
       <div class="card">

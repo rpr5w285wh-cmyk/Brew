@@ -140,7 +140,7 @@ fs.mkdirSync(out, { recursive: true });
   await page.getByText('Wind-down').first().waitFor();
   await shot('04-today-midday');
   await page.mouse.wheel(0, 2000); await page.waitForTimeout(300);
-  check('Next bar stays pinned at the top while scrolling', await page.locator('.next').evaluate((el) => { const r = el.getBoundingClientRect(); return r.top >= 0 && r.top < 60; }));
+  check('Next bar stays pinned at the bottom while scrolling', await page.locator('.next').evaluate((el) => { const r = el.getBoundingClientRect(); return r.bottom <= innerHeight && r.top > innerHeight - 200; }));
   await page.mouse.wheel(0, -4000);
   check('next banner after morning', (await page.locator('.next-title').textContent()).trim() === 'Wind-down');
 
