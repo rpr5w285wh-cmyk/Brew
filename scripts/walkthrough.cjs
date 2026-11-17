@@ -101,6 +101,8 @@ fs.mkdirSync(out, { recursive: true });
   await page.waitForTimeout(300);
   d = await events();
   check('teeth undo→redo', d.events.filter((e) => e.type === 'habit_done' && e.key === 'teeth_am').length === 2 && d.events.filter((e) => e.type === 'undo' && e.key === 'habit_done').length === 1);
+  await row('Medicine').click(); await page.waitForTimeout(200);
+  check('Medicine is in the morning list and logs', await page.locator('#step-medicine.done').isVisible());
   await row('Shower').click();
 
   // Counters: +water ×3 (with a bounce), +coffee ×2
@@ -137,6 +139,9 @@ fs.mkdirSync(out, { recursive: true });
   check('day_session logged once, morning untouched', d.events.filter((e) => e.type === 'day_session').length === 1 && d.events.filter((e) => e.type === 'session_done').length === 1);
   await page.getByText('Wind-down').first().waitFor();
   await shot('04-today-midday');
+  await page.mouse.wheel(0, 2000); await page.waitForTimeout(300);
+  check('Next bar stays pinned at the top while scrolling', await page.locator('.next').evaluate((el) => { const r = el.getBoundingClientRect(); return r.top >= 0 && r.top < 60; }));
+  await page.mouse.wheel(0, -4000);
   check('next banner after morning', (await page.locator('.next-title').textContent()).trim() === 'Wind-down');
 
   // Settings: edit a non-today weekday → today's plan untouched
@@ -278,6 +283,7 @@ fs.mkdirSync(out, { recursive: true });
     await p4.getByRole('button', { name: "I'm up" }).click();
     await p4.getByRole('button', { name: 'Skip the breather' }).click();
     await p4.locator('.row', { hasText: 'Teeth' }).first().locator('.rowmain').click();
+    await p4.locator('#step-medicine .rowmain').click();
     await p4.getByRole('button', { name: 'Skip the shower today' }).dblclick();
     await p4.getByText('Skipped today').nth(1).waitFor();
     check('Next is Outside before the moved session', (await p4.locator('.next-title').textContent()).trim() === 'Outside');
@@ -287,7 +293,9 @@ fs.mkdirSync(out, { recursive: true });
     check('Outside above Yoga break', dayTitles.indexOf('Outside') < dayTitles.indexOf('Yoga break'), JSON.stringify(dayTitles));
     check('Next is the yoga break after Later', (await p4.locator('.next-title').textContent()).trim() === 'Yoga break');
     await p4.screenshot({ path: `${out}/09-later.png`, fullPage: true });
-    await p4.locator('.next').click();
+    await p4.locator('.next').click(); await p4.waitForTimeout(400);
+    check('Next jumps to the Yoga break row', await p4.locator('#step-daybreak').evaluate((el) => { const r = el.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; }));
+    await p4.locator('#step-daybreak .rowmain').click();
     await p4.getByText("Today's session, moved from the morning.").waitFor();
     check('break plays the morning pick', (await p4.locator('.stitle').first().textContent()).trim() === planned);
     await p4.getByRole('button', { name: 'Done', exact: true }).click();

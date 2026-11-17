@@ -25,6 +25,7 @@ export const SESSIONS: Session[] = [
 
 export const HABITS: Habit[] = [
   { id: 'h-teeth-am', profileId: PROFILE_ID, key: 'teeth_am', name: 'Teeth', floorText: 'Brush.', slot: 'morning', order: 10, active: true, offRoutine: 'same' },
+  { id: 'h-medicine', profileId: PROFILE_ID, key: 'medicine', name: 'Medicine', floorText: 'Take it.', slot: 'morning', order: 15, active: true, offRoutine: 'same' },
   { id: 'h-shower', profileId: PROFILE_ID, key: 'shower', name: 'Shower', floorText: 'Any time today counts on an off day.', slot: 'morning', order: 20, active: true, offRoutine: 'same' },
   { id: 'h-outside', profileId: PROFILE_ID, key: 'outside', name: 'Outside', floorText: 'Two minutes on the front step counts.', slot: 'day', order: 10, active: true, offRoutine: 'floor' },
   { id: 'h-kitchen', profileId: PROFILE_ID, key: 'kitchen_closed', name: 'Kitchen closed after 20:00', floorText: '—', slot: 'evening', order: 5, active: false, offRoutine: 'same' },

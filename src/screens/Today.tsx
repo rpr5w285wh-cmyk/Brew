@@ -9,6 +9,7 @@ import { useSyncStatus } from './SyncCard';
 import { syncNow } from '../lib/sync';
 
 interface StepProps {
+  sid?: string;
   done: boolean;
   active: boolean;
   title: string;
@@ -19,10 +20,10 @@ interface StepProps {
   children?: JSX.Element | JSX.Element[] | false | null;
 }
 
-function Step({ done, active, title, hint, onTap, onUndo, undoLabel, children }: StepProps) {
+function Step({ sid, done, active, title, hint, onTap, onUndo, undoLabel, children }: StepProps) {
   const cls = `row ${done ? 'done' : active ? 'active' : ''}`;
   return (
-    <div class={cls}>
+    <div class={cls} id={sid ? `step-${sid}` : undefined}>
       <button class="rowmain" onClick={onTap} disabled={!onTap} aria-label={done && onTap ? `${title}, done. Tap to change` : title}>
         <span class="mark" aria-hidden="true">{done ? '✓' : ''}</span>
         <span class="body">
@@ -34,6 +35,15 @@ function Step({ done, active, title, hint, onTap, onUndo, undoLabel, children }:
       {children}
     </div>
   );
+}
+
+/** Scroll the step into view under the pinned Next bar and flash it, so the eye lands on it. */
+function jumpTo(key: string) {
+  const el = document.getElementById(`step-${key}`);
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+  setTimeout(() => el.classList.remove('flash'), 1300);
 }
 
 export function TodayScreen({ t }: { t: Today }) {
@@ -90,7 +100,7 @@ export function TodayScreen({ t }: { t: Today }) {
   const morning: Item[] = [
     {
       key: 'up', label: 'Up', done: !!state.up, go: () => go('up'),
-      el: (active) => <Step done={!!state.up} active={active} title="Up"
+      el: (active) => <Step sid="up" done={!!state.up} active={active} title="Up"
         hint={stillThatEvening && !viewing ? 'Up early? Tap to start the new day' : state.up ? `Up at ${fmtTime(state.wakeTs ?? state.up.ts)} · slept ${state.up.value}/5 · tap to change` : viewing ? 'No wake time · tap to add one' : `Target ${wakeTarget}${isWeekendMorning(day) ? ' · weekend' : ''}`}
         onTap={() => go('up')} />,
     },
@@ -98,9 +108,9 @@ export function TodayScreen({ t }: { t: Today }) {
       key: 'weigh', label: 'Weigh in', done: state.weigh !== undefined || !!state.skipped['weigh'], go: () => document.getElementById('weigh-input')?.focus(),
       el: (active: boolean) => (
         state.skipped['weigh'] && state.weigh === undefined ? (
-          <Step done active={false} title="Weigh-in" hint="Skipped this week" onUndo={() => once(() => undoLast(day, 'habit_skip', 'weigh'))} undoLabel="Undo skipping the weigh-in" />
+          <Step sid="weigh" done active={false} title="Weigh-in" hint="Skipped this week" onUndo={() => once(() => undoLast(day, 'habit_skip', 'weigh'))} undoLabel="Undo skipping the weigh-in" />
         ) : (
-        <Step done={state.weigh !== undefined} active={active} title={state.weigh !== undefined ? `Weigh-in: ${state.weigh} kg` : 'Weigh-in'}
+        <Step sid="weigh" done={state.weigh !== undefined} active={active} title={state.weigh !== undefined ? `Weigh-in: ${state.weigh} kg` : 'Weigh-in'}
           hint={state.weigh !== undefined ? undefined : 'Before coffee. Skip if no scale.'} onUndo={() => once(() => undoLast(day, 'weigh'))} undoLabel="Undo weigh-in">
           {state.weigh === undefined && (
             <span class="inline-form">
@@ -116,7 +126,7 @@ export function TodayScreen({ t }: { t: Today }) {
     {
       key: 'breather', label: 'Breather', done: !!state.breather, go: () => document.getElementById('breather-row')?.scrollIntoView({ block: 'center' }),
       el: (active) => (
-        <Step done={!!state.breather} active={active} title="Breather"
+        <Step sid="breather" done={!!state.breather} active={active} title="Breather"
           hint={state.breather ? (state.breather.key === 'skipped' ? 'Skipped today' : `Done (${state.breather.key === 'zazen' ? 'Zazen' : 'Adriene'})`) : 'Two minutes to get out of bed'}
           onUndo={() => once(() => undoLast(day, 'breather'))}>
           {!state.breather && (active || viewing) && (
@@ -131,15 +141,19 @@ export function TodayScreen({ t }: { t: Today }) {
     },
     {
       key: 'teeth_am', label: 'Teeth', done: h('teeth_am'), go: () => doHabit('teeth_am'),
-      el: (active) => <Step done={h('teeth_am')} active={active} title="Teeth" onTap={h('teeth_am') ? undefined : () => doHabit('teeth_am')} onUndo={() => undoHabit('teeth_am')} />,
+      el: (active) => <Step sid="teeth_am" done={h('teeth_am')} active={active} title="Teeth" onTap={h('teeth_am') ? undefined : () => doHabit('teeth_am')} onUndo={() => undoHabit('teeth_am')} />,
+    },
+    {
+      key: 'medicine', label: 'Medicine', done: h('medicine'), go: () => doHabit('medicine'),
+      el: (active) => <Step sid="medicine" done={h('medicine')} active={active} title="Medicine" onTap={h('medicine') ? undefined : () => doHabit('medicine')} onUndo={() => undoHabit('medicine')} />,
     },
     {
       key: 'session', label: off ? 'Session (fallback)' : session ? `Session · ${session.titleMinutes} min` : 'Session', done: !!state.sessionDone || movedLater, go: () => go('session'),
       el: (active) => movedLater ? (
-        <Step done active={false} title={sessionTitle} hint="Moved to the day — Yoga break" onTap={() => go('session', { slot: 'day' })}
+        <Step sid="session" done active={false} title={sessionTitle} hint="Moved to the day — Yoga break" onTap={() => go('session', { slot: 'day' })}
           onUndo={() => once(() => undoLast(day, 'session_later'))} undoLabel="Bring the session back to the morning" />
       ) : (
-        <Step done={!!state.sessionDone} active={active} title={sessionTitle} hint={sessionHint}
+        <Step sid="session" done={!!state.sessionDone} active={active} title={sessionTitle} hint={sessionHint}
           onTap={state.sessionDone ? undefined : () => go('session')} onUndo={() => once(() => undoLast(day, 'session_done'))} undoLabel="Undo session">
           {!state.sessionDone && !viewing && <button class="undo later" onClick={() => once(() => log('session_later'))} aria-label="Do the session later today">Later</button>}
         </Step>
@@ -148,9 +162,9 @@ export function TodayScreen({ t }: { t: Today }) {
     {
       key: 'shower', label: 'Shower', done: h('shower') || !!state.skipped['shower'], go: () => doHabit('shower'),
       el: (active) => state.skipped['shower'] && !h('shower') ? (
-        <Step done active={false} title="Shower" hint="Skipped today" onUndo={() => once(() => undoLast(day, 'habit_skip', 'shower'))} undoLabel="Undo skipping the shower" />
+        <Step sid="shower" done active={false} title="Shower" hint="Skipped today" onUndo={() => once(() => undoLast(day, 'habit_skip', 'shower'))} undoLabel="Undo skipping the shower" />
       ) : (
-        <Step done={h('shower')} active={active} title="Shower" hint={off ? 'Any time today counts' : undefined} onTap={h('shower') ? undefined : () => doHabit('shower')} onUndo={() => undoHabit('shower')}>
+        <Step sid="shower" done={h('shower')} active={active} title="Shower" hint={off ? 'Any time today counts' : undefined} onTap={h('shower') ? undefined : () => doHabit('shower')} onUndo={() => undoHabit('shower')}>
           {!h('shower') && <button class="undo later" onClick={() => once(() => log('habit_skip', { key: 'shower' }))} aria-label="Skip the shower today">skip</button>}
         </Step>
       ),
@@ -226,7 +240,7 @@ export function TodayScreen({ t }: { t: Today }) {
       )}
 
       {next && (
-        <button class="next" onClick={next.go}>
+        <button class="next" onClick={() => jumpTo(next!.key)} aria-label={`Next: ${next.label}. Show it in the list`}>
           <span class="next-label">Next</span>
           <span class="next-title">{next.label}</span>
         </button>
@@ -248,10 +262,10 @@ export function TodayScreen({ t }: { t: Today }) {
 
       <h2>Day</h2>
       <div class="card">
-        <Step done={h('outside')} active={activeKey === 'outside'} title="Outside"
+        <Step sid="outside" done={h('outside')} active={activeKey === 'outside'} title="Outside"
           hint={h('outside') ? undefined : off ? 'Floor: two minutes on the step' : 'Drop-off, lunch, or pickup · 15 min; 2 min counts'}
           onTap={h('outside') ? undefined : () => doHabit('outside')} onUndo={() => undoHabit('outside')} />
-        <Step done={!!breakDone} active={activeKey === 'daybreak'} title="Yoga break"
+        <Step sid="daybreak" done={!!breakDone} active={activeKey === 'daybreak'} title="Yoga break"
           hint={breakDone
             ? (breakDone.key === 'fallback' ? `Fallback at ${fmtTime(breakDone.ts)} — counts` : `${sessions.find((x) => x.id === breakDone.key)?.title ?? 'Done'} · ${fmtTime(breakDone.ts)}`) + (caughtUp && !state.daySession ? " · counted as today's session" : '')
             : movedLater
@@ -268,9 +282,9 @@ export function TodayScreen({ t }: { t: Today }) {
           <Step done={h('kitchen_closed')} active={false} title="Kitchen closed" hint="No eating after 20:00" onTap={h('kitchen_closed') ? undefined : () => doHabit('kitchen_closed')} onUndo={() => undoHabit('kitchen_closed')} />
         )}
         {viewing ? (
-          <Step done={!!state.lightsOut} active={false} title="Wind-down" hint={state.lightsOut ? `Lights out ${fmtTime(state.inBedTs ?? state.lightsOut.ts)} · tap to change` : 'No lights-out time · tap to add one'} onTap={() => go('winddown')} />
+          <Step sid="wind" done={!!state.lightsOut} active={false} title="Wind-down" hint={state.lightsOut ? `Lights out ${fmtTime(state.inBedTs ?? state.lightsOut.ts)} · tap to change` : 'No lights-out time · tap to add one'} onTap={() => go('winddown')} />
         ) : (
-          <Step done={false} active={activeKey === 'wind'} title="Wind-down" hint={`From ${windDownAt} · in bed by ${bedtime}${isWeekendEvening(day) ? ' · weekend' : ''}`} onTap={() => go('winddown')} />
+          <Step sid="wind" done={false} active={activeKey === 'wind'} title="Wind-down" hint={`From ${windDownAt} · in bed by ${bedtime}${isWeekendEvening(day) ? ' · weekend' : ''}`} onTap={() => go('winddown')} />
         )}
       </div>
 
