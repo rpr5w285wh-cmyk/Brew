@@ -65,11 +65,15 @@ export function Player({ session, onDuration }: { session: Session; onDuration: 
 
 const BREATH_FALLBACK = 'Lying or sitting. In through the nose for 4, hold for 4, out through the mouth for 6. Ten rounds, about two minutes. Then feet on the floor.';
 
+const STRETCH_FALLBACK = 'Standing. Reach up and side to side, five breaths each way. Fold forward, knees soft, five breaths. Roll the shoulders back ten times. Neck: ear to shoulder, both sides.';
+
 export function SessionScreen({ t }: { t: Today }) {
   const { day, state, session, swap, sessions, settings, plan, daySession } = t;
-  const breathMode = query().get('breath') === '1';
+  // An optional extra from the Next bar plays like the breather: video, fallback, Done. Nothing is logged. (C28)
+  const extraId = query().get('extra');
+  const breathMode = query().get('breath') === '1' || !!extraId;
   const dayMode = !breathMode && query().get('slot') === 'day';
-  const breath = breathMode ? sessions.find((s) => s.id === 'ywa-calming-breath') ?? null : null;
+  const breath = breathMode ? sessions.find((s) => s.id === (extraId ?? 'ywa-calming-breath')) ?? null : null;
   // Moved to the day on purpose: the break plays the morning's own pick (and keeps its swap).
   const movedLater = dayMode && !!state.sessionLater && !state.sessionDone;
   const current = breath ?? (dayMode && !movedLater ? daySession : session);
@@ -105,7 +109,7 @@ export function SessionScreen({ t }: { t: Today }) {
     <main class="screen">
       <div class="topbar">
         <div>
-          <h1>{breathMode ? 'Breather' : dayMode ? 'Yoga break' : 'Session'}</h1>
+          <h1>{extraId ? 'Stretch' : breathMode ? 'Breather' : dayMode ? 'Yoga break' : 'Session'}</h1>
           <p class="sub">{current ? `${CATEGORY_LABEL[current.category]} · ${current.titleMinutes} min${current.measuredSeconds ? ` (${Math.floor(current.measuredSeconds / 60)}:${String(current.measuredSeconds % 60).padStart(2, '0')})` : ''}` : 'No session planned'}</p>
         </div>
         <button class="iconbtn" onClick={() => go('today')}>Back</button>
@@ -115,9 +119,9 @@ export function SessionScreen({ t }: { t: Today }) {
         <>
           <div class="card" style="padding:0">
             <Player session={current} onDuration={saveDuration} />
-            <div class="fallback"><strong>No video?</strong><p>{BREATH_FALLBACK}</p></div>
+            <div class="fallback"><strong>No video?</strong><p>{extraId ? STRETCH_FALLBACK : BREATH_FALLBACK}</p></div>
           </div>
-          <button class="btn" onClick={() => go('today')}>Done — start the coffee</button>
+          <button class="btn" onClick={() => go('today')}>{extraId ? 'Done' : 'Done — start the coffee'}</button>
         </>
       )}
 

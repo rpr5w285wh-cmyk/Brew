@@ -37,6 +37,9 @@ function Step({ sid, done, active, title, hint, onTap, onUndo, undoLabel, childr
   );
 }
 
+const EXTRA_MIN_LEAD = 60; // minutes before the wind-down that still count as "a lot of time"
+const hashStr = (str: string) => { let x = 2166136261; for (let i = 0; i < str.length; i++) { x ^= str.charCodeAt(i); x = Math.imul(x, 16777619); } return x >>> 0; };
+
 /** Scroll the step into view under the pinned Next bar and flash it, so the eye lands on it. */
 function jumpTo(key: string) {
   const el = document.getElementById(`step-${key}`);
@@ -96,7 +99,7 @@ export function TodayScreen({ t }: { t: Today }) {
     : off ? '2 minutes, no video' : session ? `${session.titleMinutes} min · while the coffee brews` : 'No session planned — fallback counts';
 
   // The morning chain, in order. `done` drives the "next" highlight.
-  type Item = { key: string; label: string; done: boolean; go: () => void; el: (active: boolean) => JSX.Element };
+  type Item = { key: string; label: string; done: boolean; extra?: boolean; go: () => void; el: (active: boolean) => JSX.Element };
   const morning: Item[] = [
     {
       key: 'up', label: 'Up', done: !!state.up, go: () => go('up'),
@@ -170,15 +173,32 @@ export function TodayScreen({ t }: { t: Today }) {
       ),
     },
   ];
-  const breakItem: Item = { key: 'daybreak', label: 'Yoga break', done: false, go: () => go('session', { slot: 'day' }), el: () => <></> };
+  const breakItem: Item = { key: 'daybreak', label: movedLater || !state.sessionDone ? 'Yoga break' : 'Yoga break · optional', done: !!breakDone, go: () => go('session', { slot: 'day' }), el: () => <></> };
   const outsideItem: Item = { key: 'outside', label: 'Outside', done: h('outside'), go: () => doHabit('outside'), el: () => <></> };
   const windItem: Item = { key: 'wind', label: 'Wind-down', done: !!state.lightsOut, go: () => go('winddown'), el: () => <></> };
+
+  // Nothing left in the day and plenty of time before the wind-down: an optional extra, picked at random.
+  // Seeded by the day, the 90-minute block and the water count, so it holds still between renders and moves on later. (C28)
+  const extraItem = (): Item => {
+    const fluidsLeft = fluids < settings.waterTarget;
+    const stretches = sessions.filter((x) => x.tier === 0 && x.quiet && (x.category === 'stretch' || x.category === 'restorative'));
+    const opts: Item[] = [];
+    const seed = hashStr(`${day}|${Math.floor(nowMin / 90)}|${state.water}`);
+    if (stretches.length) {
+      const pick = stretches[seed % stretches.length];
+      opts.push({ key: 'extra', extra: true, label: `Stretch · ${pick.titleMinutes} min · optional`, done: false, go: () => go('session', { extra: pick.id }), el: () => <></> });
+    }
+    if (settings.breathingUrl) opts.push({ key: 'extra', extra: true, label: 'Breathing · optional', done: false, go: () => { window.open(settings.breathingUrl, '_blank', 'noopener'); }, el: () => <></> });
+    if (fluidsLeft) opts.push({ key: 'extra', extra: true, label: `Water · ${fluids}/${settings.waterTarget} · tap to add`, done: false, go: () => { log('water'); flash('Water +1'); }, el: () => <></> });
+    return opts[Math.floor(seed / 7) % opts.length] ?? windItem;
+  };
 
   // What's next: the first open morning step; after the wind-down time, the wind-down itself.
   let next: Item | null = null;
   if (!state.lightsOut && !viewing) {
     if (isEvening) next = windItem;
-    else next = morning.find((m) => !m.done) ?? (!outsideItem.done ? outsideItem : null) ?? (movedLater ? breakItem : null) ?? windItem;
+    else next = morning.find((m) => !m.done) ?? (!outsideItem.done ? outsideItem : null) ?? (!breakItem.done ? breakItem : null)
+      ?? (hmToMinutes(windDownAt) - nowMin >= EXTRA_MIN_LEAD ? extraItem() : null) ?? windItem;
   }
   const activeKey = next?.key ?? null;
 
@@ -256,8 +276,8 @@ export function TodayScreen({ t }: { t: Today }) {
 
       <div class="bottom-dock">
       {next && (
-        <button class="next" onClick={() => jumpTo(next!.key)} aria-label={`Next: ${next.label}. Show it in the list`}>
-          <span class="next-label">Next</span>
+        <button class="next" onClick={() => (next!.extra ? next!.go() : jumpTo(next!.key))} aria-label={next.extra ? `Optional: ${next.label}` : `Next: ${next.label}. Show it in the list`}>
+          <span class="next-label">{next.extra ? 'Extra' : 'Next'}</span>
           <span class="next-title">{next.label}</span>
         </button>
       )}
