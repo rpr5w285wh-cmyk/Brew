@@ -108,6 +108,7 @@ h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.08em; color: 
 .goodnight .big { font-size: 28px; font-weight: 700; margin: 8px 0; }
 .library .row { min-height: 48px; }
 details summary { cursor: pointer; padding: 12px 14px; font-weight: 600; }
+.toast-undo { margin-left: 12px; background: none; border: 0; color: inherit; font: inherit; font-weight: 600; text-decoration: underline; padding: 0; }
 .toast { z-index: 30; position: fixed; left: 50%; bottom: calc(170px + env(safe-area-inset-bottom)); transform: translateX(-50%); background: var(--accent); color: var(--accent-ink); padding: 10px 16px; border-radius: 999px; font-size: 14px; }
 
 /* next-thing banner */

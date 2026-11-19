@@ -106,3 +106,9 @@ export function morningTs(key: string, hm: string): number {
   const { h, m } = parseHM(hm);
   return new Date(y, mo - 1, d, h, m, 0, 0).getTime();
 }
+
+/** The day key N days after `key` (negative goes back). */
+export function addDays(key: string, n: number): string {
+  const [y, mo, d] = key.split('-').map(Number);
+  return dateKey(new Date(y, mo - 1, d + n));
+}

@@ -105,21 +105,24 @@ fs.mkdirSync(out, { recursive: true });
   check('Medicine is in the morning list and logs', await page.locator('#step-medicine.done').isVisible());
   await row('Shower').click();
 
-  // Counters: +water ×3 (with a bounce), +coffee ×2
-  const plus = page.locator('.counter .pill');
-  await plus.nth(0).click(); await page.waitForTimeout(450); await plus.nth(0).click(); await page.waitForTimeout(450); await plus.nth(0).click();
-  await page.waitForTimeout(450); await plus.nth(1).click(); await page.waitForTimeout(450); await plus.nth(1).click();
-  await page.getByText(/^last \d/).waitFor();
-  await plus.nth(0).dblclick(); // bounce → counts once
+  // Drinks (bottom bar only; the Drinks card is gone): +water ×3 (with a bounce), +coffee ×2
+  check('no Drinks card on Today', (await page.locator('h2', { hasText: /^Drinks$/ }).count()) === 0);
+  const dock = (k) => page.locator('.dock-btn').nth(['water', 'coffee', 'tea', 'tisane'].indexOf(k));
+  const dockN = async (k) => parseInt((await dock(k).locator('.dock-count').textContent()).trim(), 10);
+  await dock('water').click(); await page.waitForTimeout(450); await dock('water').click(); await page.waitForTimeout(450); await dock('water').click();
+  await page.waitForTimeout(450); await dock('coffee').click(); await page.waitForTimeout(450); await dock('coffee').click();
+  await page.waitForTimeout(450);
+  await dock('water').dblclick(); // bounce → counts once
   await page.waitForTimeout(500);
-  check('water bounce', (await page.locator('.counter .count').first().textContent()).trim() === '4');
-  // Tea (caffeinated) and tisane (counts toward water by default)
-  await page.waitForTimeout(450); await plus.nth(2).click();
-  await page.waitForTimeout(450); await plus.nth(3).click(); await page.waitForTimeout(450); await plus.nth(3).click();
+  check('water bounce', (await dockN('water')) === 4, String(await dockN('water')));
+  // Toast undo takes the last drink back
+  await page.waitForTimeout(450); await dock('water').click(); await page.waitForTimeout(300);
+  await page.locator('.toast-undo').click(); await page.waitForTimeout(400);
+  check('drink undo from the toast', (await dockN('water')) === 4, String(await dockN('water')));
+  // Tea (caffeinated) and tisane
+  await page.waitForTimeout(450); await dock('tea').click();
+  await page.waitForTimeout(450); await dock('tisane').click(); await page.waitForTimeout(450); await dock('tisane').click();
   await page.waitForTimeout(400);
-  const waterSub = (await page.locator('.counter').first().locator('.sub').textContent()).trim();
-  check('tisane counts toward water', waterSub === '6/6 · 2 tisane', waterSub);
-  check('last caffeine shown (tea after coffee)', await page.getByText(/Last caffeine/).isVisible());
   d = await events();
   check('tea and tisane logged', d.events.filter((e) => e.type === 'tea').length === 1 && d.events.filter((e) => e.type === 'tisane').length === 2);
 
@@ -142,7 +145,7 @@ fs.mkdirSync(out, { recursive: true });
   await page.mouse.wheel(0, 2000); await page.waitForTimeout(300);
   check('Next bar stays pinned at the bottom while scrolling', await page.locator('.next').evaluate((el) => { const r = el.getBoundingClientRect(); return r.bottom <= innerHeight && r.top > innerHeight - 200; }));
   await page.mouse.wheel(0, -4000);
-  check('next banner after morning', (await page.locator('.next-title').textContent()).trim() === 'Wind-down');
+  { const nt = (await page.locator('.next-title').textContent()).trim(); const nl = (await page.locator('.next-label').textContent()).trim(); check('next banner after morning (wind-down, or an optional extra with time to spare)', nt === 'Wind-down' || nl === 'Extra', nt); }
 
   // Settings: edit a non-today weekday → today's plan untouched
   const planBefore = (await events()).plans[0];
@@ -289,7 +292,7 @@ fs.mkdirSync(out, { recursive: true });
     check('Next is Outside before the moved session', (await p4.locator('.next-title').textContent()).trim() === 'Outside');
     await p4.locator('.row', { hasText: 'Outside' }).locator('.rowmain').click();
     await p4.waitForTimeout(300);
-    const dayTitles = await p4.locator('.card').nth(2).locator('.title').allTextContents();
+    const dayTitles = await p4.locator('.card').nth(1).locator('.title').allTextContents();
     check('Outside above Yoga break', dayTitles.indexOf('Outside') < dayTitles.indexOf('Yoga break'), JSON.stringify(dayTitles));
     check('Next is the yoga break after Later', (await p4.locator('.next-title').textContent()).trim() === 'Yoga break');
     await p4.screenshot({ path: `${out}/09-later.png`, fullPage: true });
@@ -328,14 +331,13 @@ fs.mkdirSync(out, { recursive: true });
     { const bt = await p5.locator('.past-banner').textContent(); check('past day banner', /Filling in Saturday/.test(bt), bt); }
     check('no Next banner on a past day', (await p5.locator('.next').count()) === 0);
     check('Saturday evening uses weekend bedtime', await p5.getByText(/in bed by 23:30 · weekend|Lights out|No lights-out time · tap to add one/).first().isVisible());
-    const coffeeRow = p5.locator('.counter', { has: p5.locator('.label', { hasText: /^Coffee$/ }) });
-    await coffeeRow.locator('.pill').click();
+    await p5.locator('.dock-btn').nth(1).click();
     await p5.waitForTimeout(400);
     check('Next day arrow enabled when viewing the past', await p5.getByRole('button', { name: 'Next day' }).isEnabled());
     await p5.screenshot({ path: `${out}/10-past-day.png`, fullPage: true });
     await p5.getByRole('button', { name: 'Today', exact: true }).click();
     await p5.locator('.daynav .sub', { hasText: /^Today · / }).waitFor();
-    { const cc = (await p5.locator('.counter', { has: p5.locator('.label', { hasText: /^Coffee$/ }) }).locator('.count').textContent()).trim(); check('back to today', cc === '0', cc + ' | ' + await p5.locator('.daynav .sub').textContent()); }
+    { const cc = parseInt((await p5.locator('.dock-btn').nth(1).locator('.dock-count').textContent()).trim(), 10); check('back to today', cc === 0, cc + ' | ' + await p5.locator('.daynav .sub').textContent()); }
     const ev5 = await p5.evaluate(async () => {
       const req = indexedDB.open('brew'); const dbx = await new Promise((r) => { req.onsuccess = () => r(req.result); });
       return new Promise((r) => { const q = dbx.transaction('events').objectStore('events').getAll(); q.onsuccess = () => r(q.result); });
@@ -408,6 +410,51 @@ fs.mkdirSync(out, { recursive: true });
     const lo = ev.find((e) => e.type === 'lights_out');
     check('entered lights-out is the event time', lo.day === '2026-11-11' && lo.ts === t('2026-11-11T22:50:00-05:00') && lo.meta.entered === true, JSON.stringify(lo));
     await ctx6.close();
+  }
+
+  // Grooming: shower every other day, beard on Fridays, haircut from Dec 7 with two one-week snoozes, evening teeth on Today
+  {
+    const ctx7 = await browser.newContext({ ...devices['iPhone 14'], locale: 'en-CA', timezoneId: 'America/Toronto' });
+    const p7 = await ctx7.newPage();
+    await p7.clock.install({ time: new Date('2026-12-03T07:00:00-05:00') }); // Thursday
+    await p7.goto(base); await p7.getByRole('heading', { name: 'Morning' }).waitFor();
+    check('Thu Dec 3: no haircut yet; untrimmed beard from Nov 27 carries over', (await p7.locator('#step-haircut').count()) === 0 && await p7.locator('#step-beard').isVisible());
+    check('evening teeth on Today', await p7.locator('#step-teeth_pm').isVisible());
+    await p7.locator('#step-teeth_pm .rowmain').click(); await p7.waitForTimeout(300);
+    check('evening teeth logs', await p7.locator('#step-teeth_pm.done').isVisible());
+    await p7.locator('#step-shower .rowmain').click(); await p7.waitForTimeout(300);
+    await p7.clock.setSystemTime(new Date('2026-12-04T07:00:00-05:00')); // Friday
+    await p7.reload(); await p7.getByRole('heading', { name: 'Morning' }).waitFor();
+    check('Fri: shower hidden after Thursday shower', (await p7.locator('#step-shower').count()) === 0);
+    check('Fri: beard shows', await p7.locator('#step-beard').isVisible());
+    check('Fri: evening teeth reset', !(await p7.locator('#step-teeth_pm.done').count()));
+    await p7.clock.setSystemTime(new Date('2026-12-05T07:00:00-05:00')); // Saturday, no shower Friday
+    await p7.reload(); await p7.getByRole('heading', { name: 'Morning' }).waitFor();
+    check('Sat: shower back after a day without', await p7.locator('#step-shower').isVisible());
+    check('Sat: untrimmed beard carries over', await p7.locator('#step-beard').isVisible());
+    await p7.locator('#step-beard .rowmain').click(); await p7.waitForTimeout(300);
+    await p7.clock.setSystemTime(new Date('2026-12-07T07:00:00-05:00')); // Monday
+    await p7.reload(); await p7.getByRole('heading', { name: 'Morning' }).waitFor();
+    check('Mon: beard hidden after the trim', (await p7.locator('#step-beard').count()) === 0);
+    check('Dec 7: haircut due', await p7.locator('#step-haircut').isVisible());
+    await p7.getByRole('button', { name: 'Snooze the haircut a week' }).click(); await p7.waitForTimeout(400);
+    check('snooze hides it', (await p7.locator('#step-haircut').count()) === 0);
+    await p7.clock.setSystemTime(new Date('2026-12-14T07:00:00-05:00'));
+    await p7.reload(); await p7.getByRole('heading', { name: 'Morning' }).waitFor();
+    check('Dec 14: back after a week', await p7.locator('#step-haircut').isVisible());
+    await p7.getByRole('button', { name: 'Snooze the haircut a week' }).click(); await p7.waitForTimeout(400);
+    await p7.clock.setSystemTime(new Date('2026-12-21T07:00:00-05:00'));
+    await p7.reload(); await p7.getByRole('heading', { name: 'Morning' }).waitFor();
+    check('Dec 21: due, no snoozes left', await p7.locator('#step-haircut').isVisible() && (await p7.getByRole('button', { name: 'Snooze the haircut a week' }).count()) === 0);
+    await p7.locator('#step-haircut .rowmain').click(); await p7.waitForTimeout(300);
+    await p7.clock.setSystemTime(new Date('2027-01-31T07:00:00-05:00'));
+    await p7.reload(); await p7.getByRole('heading', { name: 'Morning' }).waitFor();
+    check('Jan 31: hidden (next due Feb 1)', (await p7.locator('#step-haircut').count()) === 0);
+    await p7.clock.setSystemTime(new Date('2027-02-01T07:00:00-05:00'));
+    await p7.reload(); await p7.getByRole('heading', { name: 'Morning' }).waitFor();
+    check('Feb 1: six weeks after the cut', await p7.locator('#step-haircut').isVisible());
+    await p7.screenshot({ path: `${out}/12-grooming.png`, fullPage: true });
+    await ctx7.close();
   }
 
   console.log(JSON.stringify({ counts, plan: d.plans[0], checks, errors }, null, 2));

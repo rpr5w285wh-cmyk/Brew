@@ -3,7 +3,7 @@ import { liveQuery } from 'dexie';
 import { db, PROFILE_ID, type Settings, type Session, type Habit, type PlanDay, type TemplateRow } from './db';
 import { DEFAULT_SETTINGS, ensureSeeded } from './seed';
 import { prevDay, nextDay } from './day';
-import { setViewDay, setEarlyWake, beforeBoundary, activeEvents, log } from './events';
+import { setViewDay, setEarlyWake, beforeBoundary, activeEvents, log, habitHistory, type HabitHistory } from './events';
 import { eventsForDay, deriveDay, setBoundary, todayKey, type DayState } from './events';
 import { planFor } from './picker';
 import { initSync, pullBeforePlanning, markSettingsDirty } from './sync';
@@ -17,6 +17,8 @@ export interface Today {
   state: DayState;
   /** Yesterday's logical day — last night's lights out, chips and wakings. */
   prev: DayState;
+  /** Done/skipped days for habits that look back more than a day (beard, haircut). */
+  hist: HabitHistory;
   plan: PlanDay | null;
   session: Session | null;
   swap: Session | null;
@@ -40,6 +42,7 @@ export function useToday(): Today {
   useEffect(() => { lastToday.current = todayKey(); }, [viewing]);
   const [state, setState] = useState<DayState>(deriveDay(day, []));
   const [prev, setPrev] = useState<DayState>(deriveDay(prevDay(day), []));
+  const [hist, setHist] = useState<HabitHistory>({ done: {}, skipped: {} });
   const [plan, setPlan] = useState<PlanDay | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [swap, setSwap] = useState<Session | null>(null);
@@ -78,9 +81,9 @@ export function useToday(): Today {
         db.template.where('profileId').equals(PROFILE_ID).toArray(),
       ]);
       if (cancelled) return;
-      const [evD, evP] = await Promise.all([eventsForDay(d), eventsForDay(prevDay(d))]);
+      const [evD, evP, hh] = await Promise.all([eventsForDay(d), eventsForDay(prevDay(d)), habitHistory(['beard', 'haircut'])]);
       if (cancelled) return;
-      setState(deriveDay(d, evD)); setPrev(deriveDay(prevDay(d), evP));
+      setState(deriveDay(d, evD)); setPrev(deriveDay(prevDay(d), evP)); setHist(hh);
       setSettings(s); setDay(d); setPlan(p); setHabits(h); setSessions(all); setTemplate(t);
       setSession(p.sessionId ? all.find((x) => x.id === p.sessionId) ?? null : null);
       setSwap(p.swapId ? all.find((x) => x.id === p.swapId) ?? null : null);
@@ -99,7 +102,8 @@ export function useToday(): Today {
       next: (evs) => setState(deriveDay(day, evs)),
       error: (e) => console.error(e),
     });
-    return () => { sub.unsubscribe(); sub2.unsubscribe(); };
+    const sub3 = liveQuery(() => habitHistory(['beard', 'haircut'])).subscribe({ next: setHist, error: (e) => console.error(e) });
+    return () => { sub.unsubscribe(); sub2.unsubscribe(); sub3.unsubscribe(); };
   }, [ready, day]);
 
   // pulled changes from another device: re-read settings, template and plan
@@ -132,7 +136,7 @@ export function useToday(): Today {
     return () => { clearInterval(id); document.removeEventListener('visibilitychange', onVis); removeEventListener('pageshow', check); removeEventListener('focus', check); };
   }, [day, refresh, viewing]);
 
-  return { ready, day, settings, state, prev, plan, session, swap, daySession, habits, sessions, template, refresh, today: todayKey(), viewing: day !== todayKey(), viewDay: (k) => setViewing(k && k !== todayKey() ? k : null) };
+  return { ready, day, settings, state, prev, hist, plan, session, swap, daySession, habits, sessions, template, refresh, today: todayKey(), viewing: day !== todayKey(), viewDay: (k) => setViewing(k && k !== todayKey() ? k : null) };
 }
 
 // Sleep-hypothesis fields get a settings_change event, so the experiment keeps a history of targets. (C14)

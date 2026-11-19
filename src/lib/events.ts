@@ -224,3 +224,22 @@ export function deriveDay(day: string, evs: Event[]): DayState {
   }
   return s;
 }
+
+/**
+ * Days on which each habit key was done or skipped, across the whole log (undo-aware).
+ * Used by habits that look back further than yesterday (beard, haircut).
+ */
+export interface HabitHistory { done: Record<string, string[]>; skipped: Record<string, string[]> }
+export async function habitHistory(keys: string[]): Promise<HabitHistory> {
+  const types: EventType[] = ['habit_done', 'habit_skip', 'undo', 'habit_undo'];
+  const evs = (await Promise.all(types.map((t) => db.events.where('[profileId+type]').equals([PROFILE_ID, t]).toArray()))).flat();
+  const out: HabitHistory = { done: {}, skipped: {} };
+  for (const k of keys) { out.done[k] = []; out.skipped[k] = []; }
+  for (const e of activeEvents(evs)) {
+    if (!e.key || !keys.includes(e.key)) continue;
+    if (e.type === 'habit_done') out.done[e.key].push(e.day);
+    if (e.type === 'habit_skip') out.skipped[e.key].push(e.day);
+  }
+  for (const k of keys) { out.done[k].sort(); out.skipped[k].sort(); }
+  return out;
+}

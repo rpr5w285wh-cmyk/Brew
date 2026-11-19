@@ -7,6 +7,7 @@ import { go } from '../router';
 import { isInstalled } from '../lib/store';
 import { useSyncStatus } from './SyncCard';
 import { syncNow } from '../lib/sync';
+import { showerDue, beardDue, haircutState } from '../lib/grooming';
 
 interface StepProps {
   sid?: string;
@@ -50,11 +51,19 @@ function jumpTo(key: string) {
 }
 
 export function TodayScreen({ t }: { t: Today }) {
-  const { day, state, prev, settings, session, habits, sessions, daySession, viewing } = t;
+  const { day, state, prev, hist, settings, session, habits, sessions, daySession, viewing } = t;
   const nav = { day, today: t.today, viewing, go: t.viewDay };
   const off = state.context === 'off';
-  const [toast, setToast] = useState<string | null>(null);
-  const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 1400); };
+  const [toast, setToast] = useState<{ m: string; undo?: () => void } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flash = (m: string, undo?: () => void) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({ m, undo });
+    toastTimer.current = setTimeout(() => setToast(null), undo ? 3500 : 1400);
+  };
+  const toastEl = toast && (
+    <div class="toast">{toast.m}{toast.undo && <button class="toast-undo" onClick={() => { const u = toast.undo!; setToast(null); u(); }}>undo</button>}</div>
+  );
   const busy = useRef(false);
   const once = async (f: () => Promise<unknown>) => { if (busy.current) return; busy.current = true; try { await f(); } finally { busy.current = false; } };
 
@@ -162,7 +171,7 @@ export function TodayScreen({ t }: { t: Today }) {
         </Step>
       ),
     },
-    {
+    ...(!showerDue(state, prev) ? [] : [{
       key: 'shower', label: 'Shower', done: h('shower') || !!state.skipped['shower'], go: () => doHabit('shower'),
       el: (active) => state.skipped['shower'] && !h('shower') ? (
         <Step sid="shower" done active={false} title="Shower" hint="Skipped today" onUndo={() => once(() => undoLast(day, 'habit_skip', 'shower'))} undoLabel="Undo skipping the shower" />
@@ -171,10 +180,18 @@ export function TodayScreen({ t }: { t: Today }) {
           {!h('shower') && <button class="undo later" onClick={() => once(() => log('habit_skip', { key: 'shower' }))} aria-label="Skip the shower today">skip</button>}
         </Step>
       ),
-    },
+    } as Item]),
   ];
   const breakItem: Item = { key: 'daybreak', label: movedLater || !state.sessionDone ? 'Yoga break' : 'Yoga break · optional', done: !!breakDone, go: () => go('session', { slot: 'day' }), el: () => <></> };
   const outsideItem: Item = { key: 'outside', label: 'Outside', done: h('outside'), go: () => doHabit('outside'), el: () => <></> };
+  const showBeard = beardDue(day, hist);
+  const hair = haircutState(day, hist);
+  const beardItem: Item | null = showBeard ? { key: 'beard', label: 'Trim beard', done: h('beard'), go: () => jumpTo('beard'), el: () => <></> } : null;
+  const hairItem: Item | null = hair.show ? { key: 'haircut', label: 'Haircut', done: h('haircut'), go: () => jumpTo('haircut'), el: () => <></> } : null;
+  const snoozeHaircut = () => once(async () => {
+    await log('habit_skip', { key: 'haircut' });
+    flash('Haircut in a week', () => once(() => undoLast(day, 'habit_skip', 'haircut')));
+  });
   const windItem: Item = { key: 'wind', label: 'Wind-down', done: !!state.lightsOut, go: () => go('winddown'), el: () => <></> };
 
   // Nothing left in the day and plenty of time before the wind-down: an optional extra, picked at random.
@@ -189,7 +206,7 @@ export function TodayScreen({ t }: { t: Today }) {
       opts.push({ key: 'extra', extra: true, label: `Stretch · ${pick.titleMinutes} min · optional`, done: false, go: () => go('session', { extra: pick.id }), el: () => <></> });
     }
     if (settings.breathingUrl) opts.push({ key: 'extra', extra: true, label: 'Breathing · optional', done: false, go: () => { window.open(settings.breathingUrl, '_blank', 'noopener'); }, el: () => <></> });
-    if (fluidsLeft) opts.push({ key: 'extra', extra: true, label: `Water · ${fluids}/${settings.waterTarget} · tap to add`, done: false, go: () => { log('water'); flash('Water +1'); }, el: () => <></> });
+    if (fluidsLeft) opts.push({ key: 'extra', extra: true, label: `Water · ${fluids}/${settings.waterTarget} · tap to add`, done: false, go: () => { log('water').then((uid) => uid && flash('Water +1', () => once(() => undoLast(day, 'water')))); }, el: () => <></> });
     return opts[Math.floor(seed / 7) % opts.length] ?? windItem;
   };
 
@@ -197,7 +214,9 @@ export function TodayScreen({ t }: { t: Today }) {
   let next: Item | null = null;
   if (!state.lightsOut && !viewing) {
     if (isEvening) next = windItem;
-    else next = morning.find((m) => !m.done) ?? (!outsideItem.done ? outsideItem : null) ?? (!breakItem.done ? breakItem : null)
+    else next = morning.find((m) => !m.done) ?? (!outsideItem.done ? outsideItem : null)
+      ?? (beardItem && !beardItem.done ? beardItem : null) ?? (hairItem && !hairItem.done ? hairItem : null)
+      ?? (!breakItem.done ? breakItem : null)
       ?? (hmToMinutes(windDownAt) - nowMin >= EXTRA_MIN_LEAD ? extraItem() : null) ?? windItem;
   }
   const activeKey = next?.key ?? null;
@@ -243,7 +262,7 @@ export function TodayScreen({ t }: { t: Today }) {
           <Counter label="Water" sub={night === state ? fluidsSub : 'night'} count={night.water} onMinus={() => once(() => undoLast(nd, 'water'))} onPlus={() => log('water', { day: nd })} />
           <Counter label="Tisane" sub="no caffeine" count={night.tisane} onMinus={() => once(() => undoLast(nd, 'tisane'))} onPlus={() => log('tisane', { day: nd })} />
         </div>
-        {toast && <div class="toast">{toast}</div>}
+        {toastEl}
       </main>
     );
   }
@@ -265,15 +284,6 @@ export function TodayScreen({ t }: { t: Today }) {
         {morning.map((m) => m.el(m.key === activeKey))}
       </div>
 
-      <h2>Drinks</h2>
-      <div class="card">
-        <Counter label="Water" sub={fluids < settings.waterFloor ? `${fluidsSub} · floor ${settings.waterFloor}` : fluidsSub} count={state.water} onMinus={() => once(() => undoLast(day, 'water'))} onPlus={() => log('water')} />
-        <Counter label="Coffee" sub={state.lastCoffee ? `last ${fmtTime(state.lastCoffee)}` : 'none yet'} count={state.coffee} onMinus={() => once(() => undoLast(day, 'coffee'))} onPlus={() => log('coffee')} />
-        <Counter label="Tea" sub={state.lastTea ? `last ${fmtTime(state.lastTea)}` : 'caffeinated'} count={state.tea} onMinus={() => once(() => undoLast(day, 'tea'))} onPlus={() => log('tea')} />
-        <Counter label="Tisane" sub={settings.tisaneCountsAsWater ? 'counts as water' : 'no caffeine'} count={state.tisane} onMinus={() => once(() => undoLast(day, 'tisane'))} onPlus={() => log('tisane')} />
-        {state.lastCaffeine && <div class="counter-note">Last caffeine {fmtTime(state.lastCaffeine)}</div>}
-      </div>
-
       <div class="bottom-dock">
       {next && (
         <button class="next" onClick={() => (next!.extra ? next!.go() : jumpTo(next!.key))} aria-label={next.extra ? `Optional: ${next.label}` : `Next: ${next.label}. Show it in the list`}>
@@ -283,7 +293,7 @@ export function TodayScreen({ t }: { t: Today }) {
       )}
       <nav class="drink-dock" aria-label="Add a drink">
         {([['water', 'Water', state.water], ['coffee', 'Coffee', state.coffee], ['tea', 'Tea', state.tea], ['tisane', 'Tisane', state.tisane]] as const).map(([k, label, n]) => (
-          <button key={k} class="dock-btn" onClick={() => { log(k); flash(`${label} +1`); }} aria-label={`Add one ${label.toLowerCase()}, ${n} so far`}>
+          <button key={k} class="dock-btn" onClick={() => once(async () => { const uid = await log(k); if (uid) flash(`${label} +1 · ${n + 1} today`, () => once(() => undoLast(day, k))); })} aria-label={`Add one ${label.toLowerCase()}, ${n} so far`}>
             <span class="dock-label">{label}</span><span class="dock-count">{n} <b>+</b></span>
           </button>
         ))}
@@ -295,6 +305,18 @@ export function TodayScreen({ t }: { t: Today }) {
         <Step sid="outside" done={h('outside')} active={activeKey === 'outside'} title="Outside"
           hint={h('outside') ? undefined : off ? 'Floor: two minutes on the step' : 'Drop-off, lunch, or pickup · 15 min; 2 min counts'}
           onTap={h('outside') ? undefined : () => doHabit('outside')} onUndo={() => undoHabit('outside')} />
+        {showBeard && (
+          <Step sid="beard" done={h('beard')} active={activeKey === 'beard'} title="Trim beard"
+            hint={h('beard') ? undefined : weekdayOf(day) === 5 ? 'Weekly · Fridays' : 'Weekly · from Friday'}
+            onTap={h('beard') ? undefined : () => doHabit('beard')} onUndo={() => undoHabit('beard')} />
+        )}
+        {hair.show && (
+          <Step sid="haircut" done={h('haircut')} active={activeKey === 'haircut'} title="Haircut"
+            hint={h('haircut') ? 'Next one in six weeks' : `Every six weeks${hair.snoozes ? ` · snoozed ${hair.snoozes}×` : ''}${hair.canSnooze ? '' : ' · no snoozes left'}`}
+            onTap={h('haircut') ? undefined : () => doHabit('haircut')} onUndo={() => undoHabit('haircut')}>
+            {!h('haircut') && hair.canSnooze && !viewing && <button class="undo later" onClick={snoozeHaircut} aria-label="Snooze the haircut a week">+1 wk</button>}
+          </Step>
+        )}
         <Step sid="daybreak" done={!!breakDone} active={activeKey === 'daybreak'} title="Yoga break"
           hint={breakDone
             ? (breakDone.key === 'fallback' ? `Fallback at ${fmtTime(breakDone.ts)} — counts` : `${sessions.find((x) => x.id === breakDone.key)?.title ?? 'Done'} · ${fmtTime(breakDone.ts)}`) + (caughtUp && !state.daySession ? " · counted as today's session" : '')
@@ -308,6 +330,8 @@ export function TodayScreen({ t }: { t: Today }) {
 
       <h2>Evening</h2>
       <div class="card">
+        <Step sid="teeth_pm" done={h('teeth_pm')} active={false} title="Teeth" hint={h('teeth_pm') ? undefined : 'Before bed'}
+          onTap={h('teeth_pm') ? undefined : () => doHabit('teeth_pm')} onUndo={() => undoHabit('teeth_pm')} />
         {kitchen?.active && (
           <Step done={h('kitchen_closed')} active={false} title="Kitchen closed" hint="No eating after 20:00" onTap={h('kitchen_closed') ? undefined : () => doHabit('kitchen_closed')} onUndo={() => undoHabit('kitchen_closed')} />
         )}
@@ -319,7 +343,7 @@ export function TodayScreen({ t }: { t: Today }) {
       </div>
 
       <p class="note muted">One screen, one answer. Taps are timestamped and saved on this phone first.</p>
-      {toast && <div class="toast">{toast}</div>}
+      {toastEl}
     </main>
   );
 }

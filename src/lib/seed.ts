@@ -30,6 +30,8 @@ export const HABITS: Habit[] = [
   { id: 'h-outside', profileId: PROFILE_ID, key: 'outside', name: 'Outside', floorText: 'Two minutes on the front step counts.', slot: 'day', order: 10, active: true, offRoutine: 'floor' },
   { id: 'h-kitchen', profileId: PROFILE_ID, key: 'kitchen_closed', name: 'Kitchen closed after 20:00', floorText: '—', slot: 'evening', order: 5, active: false, offRoutine: 'same' },
   { id: 'h-teeth-pm', profileId: PROFILE_ID, key: 'teeth_pm', name: 'Teeth', floorText: 'Brush.', slot: 'evening', order: 10, active: true, offRoutine: 'same' },
+  { id: 'h-beard', profileId: PROFILE_ID, key: 'beard', name: 'Trim beard', floorText: 'Weekly, Fridays.', slot: 'weekly', order: 20, active: true, offRoutine: 'same' },
+  { id: 'h-haircut', profileId: PROFILE_ID, key: 'haircut', name: 'Haircut', floorText: 'Every six weeks; snooze up to two weeks.', slot: 'weekly', order: 30, active: true, offRoutine: 'same' },
   { id: 'h-weigh', profileId: PROFILE_ID, key: 'weigh', name: 'Weigh-in', floorText: 'Skip if no scale; the trend tolerates gaps.', slot: 'weekly', order: 10, active: true, offRoutine: 'skip' },
 ];
 
